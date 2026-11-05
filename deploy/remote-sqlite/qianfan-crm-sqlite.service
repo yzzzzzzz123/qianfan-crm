@@ -1,0 +1,23 @@
+[Unit]
+Description=Qianfan CRM live SQLite JDBC access (SSH only)
+After=network.target qianfan-crm.service
+
+[Service]
+Type=simple
+User=45210
+Group=45210
+RootDirectory=/opt/ai-scene-center/rootfs
+WorkingDirectory=/srv/qianfan-crm/remote-sqlite
+ExecStart=/srv/qianfan-crm/remote-sqlite/jre/bin/java -Xms32m -Xmx160m -Djava.io.tmpdir=/srv/qianfan-crm/remote-sqlite/tmp -cp /srv/qianfan-crm/remote-sqlite/lib/*:/srv/qianfan-crm/remote-sqlite/classes QianfanSqliteServer /srv/qianfan-crm/remote-sqlite/private/users.properties
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=20
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+LimitNOFILE=2048
+
+[Install]
+WantedBy=multi-user.target

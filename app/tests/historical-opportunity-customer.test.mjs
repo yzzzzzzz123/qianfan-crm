@@ -1,0 +1,32 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import {DatabaseSync} from 'node:sqlite';
+import {legacyDatabase} from './helpers/legacy-database.mjs';
+import {openDatabase,all,one} from '../server/database.mjs';
+import {migrateHistoricalOpportunityCustomers} from '../server/historical-opportunity-customer-schema.mjs';
+
+test('历史缺失客户可保留空值，迁移保留关联并维持新增和清空约束',t=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'qf-history-customer-')),filename=path.join(dir,'db.sqlite');
+ const legacy=legacyDatabase(filename);legacy.exec("CREATE TRIGGER fail31 BEFORE INSERT ON schema_version WHEN NEW.version=31 BEGIN SELECT RAISE(ABORT,'forced31');END");legacy.close();
+ assert.throws(()=>openDatabase(filename),/forced31/);
+ const db=new DatabaseSync(filename);db.exec('PRAGMA foreign_keys=ON; DROP TRIGGER fail31');
+ t.after(()=>{db.close();fs.rmSync(dir,{recursive:true,force:true});});
+ assert.equal(one(db,'SELECT max(version) n FROM schema_version').n,30);
+ const before=Object.fromEntries(['opportunities','contracts','activities','payments'].map(table=>[table,all(db,'SELECT * FROM '+table)]));
+ migrateHistoricalOpportunityCustomers(db);
+ for(const [table,rows] of Object.entries(before))assert.deepEqual(all(db,'SELECT * FROM '+table),rows,table);
+ assert.throws(()=>db.exec("UPDATE opportunities SET customer_id=NULL WHERE id=1"),/known opportunity customer/);
+ const guard=one(db,"SELECT sql FROM sqlite_master WHERE name='opportunities_required_customer_insert'").sql;
+ assert.throws(()=>db.exec("INSERT INTO opportunities(name,customer_id,owner_id,stage,amount,stage_at,created_at,updated_at,product_amount,sale_type,order_type) VALUES('',NULL,2,'线索',0,'2026-01-01','2026-01-01','2026-01-01',0,'续费','千帆')"),/customer is required/);
+ db.exec('DROP TRIGGER opportunities_required_customer_insert');
+ db.exec("INSERT INTO opportunities(name,customer_id,owner_id,stage,amount,stage_at,created_at,updated_at,product_amount,sale_type,order_type) VALUES('',NULL,2,'线索',0,'2026-01-01','2026-01-01','2026-01-01',0,'续费','千帆')");
+ db.exec(guard);
+ const id=one(db,'SELECT max(id) id FROM opportunities').id;
+ db.prepare('UPDATE opportunities SET customer_id=1 WHERE id=?').run(id);
+ assert.throws(()=>db.prepare('UPDATE opportunities SET customer_id=NULL WHERE id=?').run(id),/known opportunity customer/);
+ assert.deepEqual(all(db,'PRAGMA foreign_key_check'),[]);assert.equal(one(db,'PRAGMA integrity_check').integrity_check,'ok');
+ migrateHistoricalOpportunityCustomers(db);assert.equal(one(db,'SELECT max(version) n FROM schema_version').n,31);
+});

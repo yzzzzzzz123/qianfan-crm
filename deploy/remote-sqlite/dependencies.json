@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "javaRelease": 17,
+  "runtime": {
+    "vendor": "Azul Zulu",
+    "version": "21.0.13",
+    "url": "https://cdn.azul.com/zulu/bin/zulu21.54.107-ca-jre21.0.13-linux_x64.tar.gz",
+    "sha256": "cb1021b29c2909faefa57589e9506dcb9c18d88d2659e5e22f4ac1bb20e36e50"
+  },
+  "libraries": [
+    {
+      "artifact": "org.apache.calcite.avatica:avatica-standalone-server:1.29.0",
+      "url": "https://repo.maven.apache.org/maven2/org/apache/calcite/avatica/avatica-standalone-server/1.29.0/avatica-standalone-server-1.29.0.jar",
+      "sha256": "aabbefbfc4fdb3dded38c4308b8864df15431bfc6ca7c962c0111f22927096b3"
+    },
+    {
+      "artifact": "org.xerial:sqlite-jdbc:3.53.4.0",
+      "url": "https://repo.maven.apache.org/maven2/org/xerial/sqlite-jdbc/3.53.4.0/sqlite-jdbc-3.53.4.0.jar",
+      "sha256": "bcb1f51e36f940867e83342f9efbf5968ac44a6bef4d397bb4af7b17b45cd2fb"
+    }
+  ],
+  "compiler": {
+    "artifact": "org.eclipse.jdt:ecj:3.42.0",
+    "sha256": "29f6d3918ee02db4400c103bc25dd90a22491c3a395867d9393070cb96a7dd29"
+  }
+}

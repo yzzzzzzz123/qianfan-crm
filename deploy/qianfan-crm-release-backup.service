@@ -1,0 +1,17 @@
+[Unit]
+Description=Qianfan CRM verified pre-release SQLite backup
+
+[Service]
+Type=oneshot
+User=45210
+Group=45210
+RootDirectory=/opt/ai-scene-center/rootfs
+WorkingDirectory=/srv/qianfan-crm/current/app
+Environment=DB_PATH=/srv/qianfan-crm/data/crm.sqlite
+Environment=QF_BACKUP_DIR=/srv/qianfan-crm/backups
+ExecStart=/opt/qianfan-node24/bin/node /srv/qianfan-crm/current/deploy/backup.mjs --kind release
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true

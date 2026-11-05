@@ -1,0 +1,31 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {fixture} from './helpers/fixture.mjs';
+import {today} from '../server/domain.mjs';
+
+test('仅获合同协作授权的PM可见合同客户名称，不获得完整客户、联系人或来源权限',async t=>{
+  const f=await fixture(t),admin=await f.login(1);
+  const member=await f.request('/users',{actor:admin,method:'POST',body:{name:'仅合同协作PM',username:'contract_name_only_pm',role:'pm',dingtalk_only:true}});
+  assert.equal(member.status,200);
+  const customer=await f.request('/customers',{actor:admin,method:'POST',body:{name:'仅合同展示企业全称有限公司',owner_id:2,note:'未授权客户档案备注',credit_code:'CONTRACT-ONLY-CODE'}});
+  assert.equal(customer.status,200);const customerId=customer.body.id;
+  const contact=await f.request('/contacts',{actor:admin,method:'POST',body:{customer_id:customerId,name:'未授权联系人',phone:'13800001234'}});
+  assert.equal(contact.status,200);
+  const contract=await f.request('/contracts',{actor:admin,method:'POST',body:{customer_id:customerId,owner_id:2,collaborator_pm:member.body.id,name:'单独授权合同',sign_date:today(),items:[{name:'服务',kind:'实施',amount:100}]}});
+  assert.equal(contract.status,200);
+  const pm=await f.login(member.body.id),response=await f.request('/state',{actor:pm});assert.equal(response.status,200);
+  const state=response.body,visible=state.contracts.find(c=>c.id===contract.body.id);
+  assert.ok(visible);assert.equal(visible.customer_name,'仅合同展示企业全称有限公司');
+  assert.equal(visible.can_read_sources,false);assert.equal(visible.can_download_attachments,false);
+  assert.equal(state.customers.some(c=>c.id===customerId),false);
+  assert.equal(state.contacts.some(c=>c.customer_id===customerId),false);
+  assert.equal(state.opportunities.some(o=>o.customer_id===customerId),false);
+  assert.doesNotMatch(JSON.stringify(state),/未授权客户档案备注|CONTRACT-ONLY-CODE|未授权联系人|13800001234/);
+  assert.equal((await f.request('/source-records?entity=customer&id='+customerId,{actor:pm})).status,403);
+  assert.equal((await f.request('/source-records?entity=contract&id='+contract.body.id,{actor:pm})).status,403);
+  assert.equal((await f.request('/customers/'+customerId+'/company-profile/refresh',{actor:pm,method:'POST',body:{}})).status,403);
+  f.db.prepare('UPDATE contracts SET collaborator_pm=NULL WHERE id=?').run(contract.body.id);
+  const revoked=(await f.request('/state',{actor:pm})).body;
+  assert.equal(revoked.contracts.some(c=>c.id===contract.body.id),false);
+  assert.doesNotMatch(JSON.stringify(revoked),/仅合同展示企业全称有限公司/);
+});

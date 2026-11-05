@@ -1,0 +1,23 @@
+[Unit]
+Description=Qianfan Sales CRM
+After=network.target
+
+[Service]
+Type=simple
+User=45210
+Group=45210
+RootDirectory=/opt/ai-scene-center/rootfs
+WorkingDirectory=/srv/qianfan-crm/current/app
+Environment=QF_DEPLOY_CONFIG=/srv/qianfan-crm/private/application.json
+ExecStart=/opt/qianfan-node24/bin/node /srv/qianfan-crm/current/deploy/server-entry.mjs
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

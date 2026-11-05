@@ -1,0 +1,28 @@
+{
+  "project": "qianfan-crm",
+  "source": ".",
+  "host": "your-server.example.com",
+  "origin": "https://crm.example.com",
+  "basePath": "/qf-crm/",
+  "service": "qianfan-crm.service",
+  "rootfs": "/opt/ai-scene-center/rootfs",
+  "releaseRoot": "/srv/qianfan-crm/releases",
+  "currentLink": "/srv/qianfan-crm/current",
+  "folders": {
+    "app/public": "app/public",
+    "app/server": "app/server",
+    "app/scripts": "app/scripts",
+    "app/tests": "app/tests",
+    "app/widgets": "app/widgets",
+    "deploy": "deploy"
+  },
+  "files": [
+    "app/package.json",
+    "app/package-lock.json",
+    "local/production-config.mjs",
+    "local/company-profile-config.mjs",
+    "local/company-profile-automation.mjs",
+    "local/read-company-profile-key.ps1",
+    "local/save-company-profile-key.ps1"
+  ]
+}

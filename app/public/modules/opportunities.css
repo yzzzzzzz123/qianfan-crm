@@ -1,0 +1,33 @@
+.opportunity-list-panel { min-width: 0; }
+.opportunity-list-scroll:focus-visible { outline: 2px solid var(--sail); outline-offset: -2px; }
+.opportunity-list-table { min-width: 1280px; }
+.opportunity-list-table .opportunity-group-heading th {
+  padding-top: 12px;
+  padding-bottom: 12px;
+  background: #f4f7fc;
+  font-size: 13px;
+  font-weight: 600;
+}
+.opportunity-group-heading th > div { display: flex; align-items: center; gap: 10px; }
+.opportunity-group-count { color: var(--muted); font-size: 11px; font-weight: 400; }
+.opportunity-list-table .opportunity-customer { min-width: 190px; max-width: 260px; }
+.opportunity-list-table .opportunity-customer .record-title {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.opportunity-list-table .opportunity-product {
+  min-width: 150px;
+  max-width: 260px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.6;
+}
+.opportunity-list-table .number { text-align: right; font-variant-numeric: tabular-nums; }
+.opportunity-list-table .opportunity-created { color: var(--secondary); font-variant-numeric: tabular-nums; }
+@media print {
+  .opportunity-list-table { min-width: 0; white-space: normal; }
+  .opportunity-list-table .opportunity-customer,
+  .opportunity-list-table .opportunity-product { min-width: 0; }
+  .opportunity-list-table tbody { break-inside: auto; }
+  .opportunity-list-table tr { break-inside: avoid; }
+}

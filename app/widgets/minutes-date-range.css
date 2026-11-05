@@ -1,0 +1,7 @@
+.qf-minutes-calendar{font-family:'HarmonyOS Sans SC','HarmonyOS Sans','PingFang SC','Microsoft YaHei',sans-serif;font-size:14px;line-height:1.5;color:#222631}
+.qf-minutes-calendar input{height:auto;border:0;border-radius:0;background:transparent;padding:0;outline:none;box-shadow:none;font-family:inherit}
+.qf-minutes-calendar .arco-picker{width:280px;display:flex;font-size:12px;line-height:1.5715}
+.qf-minutes-calendar .arco-picker-body{padding:0 16px 14px}
+.qf-minutes-calendar-popup{position:relative;z-index:1000}
+.qf-minutes-calendar .arco-btn{border-radius:5px;font-size:12px;height:34px;padding:0 14px}
+@media(max-width:760px){.qf-minutes-calendar,.qf-minutes-calendar .arco-picker{width:100%}}
