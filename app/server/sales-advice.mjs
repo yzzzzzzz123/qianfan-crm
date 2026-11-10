@@ -15,12 +15,12 @@ export function validateSalesAdvice(value) {
   return {stage_assessment:value.stage_assessment,next_actions:value.next_actions.map(x=>Object.fromEntries(['priority','action','purpose','timing','success_signal'].map(k=>[k,x[k]]))),talk_tracks:value.talk_tracks.map(x=>({scenario:x.scenario,script:x.script})),...Object.fromEntries(['materials','risks','information_gaps','cautions'].map(k=>[k,value[k]]))};
 }
 export function createSalesAdviceAI({env=process.env,fetcher=fetch}={}) {
-  const key=env.PPIO_API_KEY;
+  const key=env.AI_API_KEY;
   async function analyze(context) {
-    assert(key,'派欧云Qwen尚未配置，请联系管理员配置AI凭据',503);
+    assert(key,'紫猫云 DeepSeek尚未配置，请联系管理员配置AI凭据',503);
     let response,result;
     try {
-      response=await fetcher(AI_ENDPOINT,{method:'POST',headers:{Authorization:'Bearer '+key,'Content-Type':'application/json'},body:JSON.stringify({model:AI_MODEL,messages:[{role:'system',content:SALES_ADVICE_SYSTEM},{role:'user',content:JSON.stringify(context)}],temperature:0.2,max_tokens:10000,response_format:{type:'json_object'},reasoning_effort:'none',stream:false}),signal:AbortSignal.timeout(120000),redirect:'error'});
+      response=await fetcher(AI_ENDPOINT,{method:'POST',headers:{Authorization:'Bearer '+key,'Content-Type':'application/json'},body:JSON.stringify({model:AI_MODEL,messages:[{role:'system',content:SALES_ADVICE_SYSTEM},{role:'user',content:JSON.stringify(context)}],temperature:0.2,max_tokens:10000,response_format:{type:'json_object'},thinking:{type:'disabled'},stream:false}),signal:AbortSignal.timeout(120000),redirect:'error'});
       if(!response.ok)throw new Error();
       const raw=await response.text();if(raw.length>512000)throw new Error();result=JSON.parse(raw);
     }catch{throw new AppError('AI分析服务暂时不可用，请稍后重试；未修改商机或跟进记录',502);}

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {collectionsPage,contractAnalysisPanel,formWorkflow} from '../public/modules/contract-workflow.js';
+import {collectionsPage,collectionDetail,contractAnalysisPanel,formWorkflow} from '../public/modules/contract-workflow.js';
 import {formContent} from '../public/views.js';
 
 function state(role='admin'){
@@ -15,32 +15,32 @@ const page={view:'collections',q:'',owner:''};
 
 test('仅合同授权的PM可以显示最小客户名称，不需要完整客户档案',()=>{
  const S=state('pm');S.customers=[];S.contracts[0].customer_name='仅名称客户<核对>';
- const html=collectionsPage(S,page);
+ const html=collectionDetail(S,1);
  assert.match(html,/仅名称客户&lt;核对&gt;/);
  assert.doesNotMatch(html,/仅名称客户<核对>/);
  assert.deepEqual(S.customers,[]);
 });
 
 test('已到账回款保留产品分配入口，待到账仅确认及维护计划，未知分配不能显示为零',()=>{
- const html=collectionsPage(state(),page);
+ const html=collectionDetail(state(),1);
  for(const id of [92,93])assert.match(html,new RegExp('data-action="payment-allocation" data-id="'+id+'"'));
  assert.doesNotMatch(html,/data-action="payment-allocation" data-id="91"/);
  assert.match(html,/data-action="collection-receive" data-id="91"/);
  assert.match(html,/data-action="payment-plan" data-id="91"/);
  assert.doesNotMatch(html,/data-action="(?:collection-receive|payment-plan)" data-id="9[23]"/);
  assert.match(html,/产品 ¥20(?:\.00)? · 服务 ¥10(?:\.00)?/);
- assert.match(html,/产品／服务分配待核对/);
+ assert.match(html,/提成分配待补/);
 });
 
-test('销售只读回款分配，关联PM仅维护项目，不能确认到账或触发附件AI',()=>{
- for(const role of ['sales','pm']){
-  const S=state(role),html=collectionsPage(S,page);
-  assert.doesNotMatch(html,/data-action="(?:payment-allocation|new-payment|collection-receive|payment-plan)"/);
-  if(role==='pm')assert.match(html,/data-action="contract-project" data-id="1"/);
-  else assert.doesNotMatch(html,/data-action="contract-project"/);
-  assert.doesNotMatch(formContent(S,'payment-allocation',92),/<form/);
-  assert.doesNotMatch(formWorkflow(S,'contract-extract',1),/<form/);
- }
+test('销售维护本人财务，关联PM仅维护项目，其他销售不能操作',()=>{
+ const sales=state('sales'),html=collectionDetail(sales,1);
+ assert.match(html,/data-action="new-payment"/);assert.match(html,/data-action="contract-maintain"/);
+ assert.match(formContent(sales,'payment-allocation',92),/<form/);assert.match(formWorkflow(sales,'contract-extract',1),/请先上传合同原件/);
+ sales.contracts[0].attachments=[{id:99,filename:'合同.pdf',mime_type:'application/pdf'}];assert.match(formWorkflow(sales,'contract-extract',1),/<form/);
+ const pm=state('pm'),detail=collectionDetail(pm,1);
+ assert.doesNotMatch(detail,/data-action="(?:payment-allocation|new-payment|collection-receive|payment-plan)"/);
+ assert.match(detail,/data-action="contract-project" data-id="1"/);
+ assert.doesNotMatch(formContent(pm,'payment-allocation',92),/<form/);assert.doesNotMatch(formWorkflow(pm,'contract-extract',1),/<form/);
 });
 
 test('合同附件AI展示使用分金额，未知日期金额保持未知，原件文字转义且PM不读取正文',()=>{

@@ -1,7 +1,9 @@
+import {assertContractDataAccess,canManageContractData} from '../contract-access.mjs';
 import { createHash } from 'node:crypto';
 import { all, one } from '../database.mjs';
 import { assert, cents, choice, now, period, today, text, validDate, processScore } from '../domain.mjs';
-import {salesCommissionPreviews} from './sales-commissions.mjs';
+import {salesCommissionPreviews,realtimeSalesCommissionPreviews} from './sales-commissions.mjs';
+import {realtimeLegacyCommissionPreviews} from './commission-realtime-legacy.mjs';
 import {performancePolicy,performanceDefaults} from '../../public/modules/performance-policy.js';
 import {commissionReceiptReview} from './commission-receipts.mjs';
 import {commissionInputs} from './commission-inputs.mjs';
@@ -19,14 +21,14 @@ export function commissionPreview(db, rules, actor, requested) {
   const monthly=/^\d{4}-\d{2}$/.test(selected)&&!!policy.sales_policy;
   const trialOnly=monthly&&selected<policy.sales_policy.effective_month;
   const legacyPeriod=/^\d{4}-\d{2}$/.test(selected)?incentivePeriod(`${selected}-01`,policy.period):selected;
-  const items = all(db,`SELECT i.*,c.owner_id,c.sign_date,c.name contract_name,c.contract_no FROM contract_items i JOIN contracts c ON c.id=i.contract_id JOIN users u ON u.id=c.owner_id WHERE u.business_member=1 AND u.developer_admin=0 AND c.retired_at IS NULL AND c.lifecycle!='草稿' AND c.commission_policy='legacy' AND i.margin IS NOT NULL AND i.rate IS NOT NULL ORDER BY i.id`)
+  const items = all(db,`SELECT i.*,c.owner_id,c.sign_date,c.name contract_name,c.contract_no FROM contract_items i JOIN contracts c ON c.id=i.contract_id JOIN users u ON u.id=c.owner_id WHERE i.retired_at IS NULL AND u.business_member=1 AND u.developer_admin=0 AND c.retired_at IS NULL AND c.lifecycle!='草稿' AND c.commission_policy='legacy' AND i.margin IS NOT NULL AND i.rate IS NOT NULL ORDER BY i.id`)
     .filter(i=>incentivePeriod(i.sign_date,policy.period)===legacyPeriod && i.sign_date<=today());
   const batches = all(db,'SELECT b.* FROM commission_batches b JOIN users u ON u.id=b.sales_id WHERE u.business_member=1 AND u.developer_admin=0 ORDER BY b.id DESC');
   const lockedLines = all(db,`SELECT l.*,b.sales_id,b.kind,b.period FROM commission_lines l JOIN commission_batches b ON b.id=l.batch_id`);
   const eligibleUsers = all(db,"SELECT id,name,role FROM users WHERE business_member=1 AND developer_admin=0 AND (role='sales' OR id=?)",manager);
   const result = [];
   for (const user of eligibleUsers) for (const kind of user.id===manager ? ['personal','management'] : ['personal']) {
-    if(monthly&&user.id!==manager)continue;
+    if(monthly)continue;
     if (actor.role!=='admin' && (actor.id!==user.id || actor.role==='pm')) continue;
     const matching = items.filter(i=>kind==='personal'?i.owner_id===user.id:i.owner_id!==manager);
     let baseSum=0;
@@ -55,7 +57,7 @@ export function commissionPreview(db, rules, actor, requested) {
     const fingerprint=digest({user:user.id,kind,selected:legacyPeriod,policy,lines,confirmed});
     result.push({sales_id:user.id,name:user.name,kind,period:legacyPeriod,scheme:'legacy',base:baseSum,rate,total,confirmed,paid:locked.filter(b=>b.status==='paid').reduce((s,b)=>s+b.amount,0),due,lines,fingerprint,blocked:due<0||lines.some(l=>l.amount<0),unlock_by_payment:policy.unlock_by_payment});
   }
-  if(monthly)result.unshift(...salesCommissionPreviews(db,rules,actor,selected,performanceFor));
+  if(monthly)result.unshift(...salesCommissionPreviews(db,rules,actor,selected,performanceFor,manager));
   const salesBasis=monthly?commissionInputs(db,selected).basis.filter(p=>actor.role==='admin'||actor.role==='sales'&&p.sales_id===actor.id):[];
   const prepared=result.map(p=>{
     const basis=p.kind==='personal'?salesBasis.find(b=>b.sales_id===p.sales_id):null;
@@ -63,13 +65,21 @@ export function commissionPreview(db, rules, actor, requested) {
     return {...p,...(basis?{sales_basis:basis}:{}),...(pending?{blocked:true,amount_pending:true,issues:[...(p.issues||[]),'已按销售小二取到实际到账；个人计提合同尚未具备完整的已确认毛利规则，待核对后计算']}:{})};
   });
   const previews=trialOnly?prepared.map(p=>({...p,blocked:true,trial_only:true,issues:[...(p.issues||[]),'所选月份早于规则生效月份，仅按现行 SOP 补算试算，不可确认结算'],fingerprint:digest({fingerprint:p.fingerprint,trial_only:true})})):prepared;
-  return {period:selected,mode:monthly?'month':policy.period,legacy_mode:policy.period,trial_only:trialOnly,sales_basis:salesBasis,receipt_review:commissionReceiptReview(db,actor,selected),previews,batches:batches.filter(b=>actor.role==='admin'||(actor.role==='sales'&&b.sales_id===actor.id)).map(b=>({...b,snapshot:JSON.parse(b.snapshot)}))};
+  const visibleBatches=batches.filter(b=>actor.role==='admin'||(actor.role==='sales'&&b.sales_id===actor.id)).map(b=>({...b,snapshot:JSON.parse(b.snapshot)}));
+  const realtimeRows=[...(monthly?realtimeSalesCommissionPreviews(db,rules,actor,selected,performanceFor,manager):[]),...realtimeLegacyCommissionPreviews(db,rules,actor,selected,previews)];
+  const realtime_previews=realtimeRows.map(p=>{
+    const historical=visibleBatches.filter(b=>b.sales_id===p.sales_id&&b.kind===p.kind&&b.period===p.period);
+    const paid=historical.filter(b=>b.status==='paid').reduce((s,b)=>s+b.amount,0);
+    const row={...p,inactive:p.active===false||p.active===0,blocked:false,historical_confirmed:historical.filter(b=>b.status==='confirmed').reduce((s,b)=>s+b.amount,0),paid,unpaid_amount:p.estimated_total==null?null:p.estimated_total-paid};
+    return {...row,fingerprint:digest({row,policy,paid_batches:historical.filter(b=>b.status==='paid').map(b=>({id:b.id,amount:b.amount,paid_at:b.paid_at}))})};
+  });
+  return {period:selected,mode:monthly?'month':policy.period,legacy_mode:policy.period,trial_only:trialOnly,realtime:true,updated_at:now(),live_pay_enabled:false,realtime_previews,sales_basis:salesBasis,receipt_review:commissionReceiptReview(db,actor,selected),previews,batches:visibleBatches,disbursements:visibleBatches.filter(b=>b.status==='paid').map(b=>({...b,source_batch_id:b.id,note:b.paid_note}))};
 }
 
-export function performanceFor(db,rules,user,month=period()) {
+export function performanceFor(db,rules,user,month=period(),options={}) {
   assert(/^\d{4}-(0[1-9]|1[0-2])$/.test(month),'绩效月份无效');
   const review=one(db,'SELECT * FROM performance_reviews WHERE user_id=? AND month=?',user.id,month);
-  if(review?.status==='confirmed') return {...JSON.parse(review.snapshot),review_id:review.id,status:'confirmed'};
+  if(review?.status==='confirmed'&&!options.recalculate) return {...JSON.parse(review.snapshot),review_id:review.id,status:'confirmed'};
   const opps=all(db,'SELECT * FROM opportunities WHERE archived_at IS NULL');
   const activeOpportunityIds=new Set(opps.map(o=>o.id));
   const events=all(db,'SELECT * FROM activity_events');
@@ -96,33 +106,32 @@ export function performanceFor(db,rules,user,month=period()) {
   return {user_id:user.id,name:user.name,month,process,raw,processPoints,resultPoints:eligible?resultPoints:null,automatic_total:eligible?automaticTotal:null,final_score:review?.final_score??null,total:eligible?total:null,grade:eligible?grade?.grade||null:null,salary_factor:eligible?grade?.factor??null:null,eligible,quarterly_target:quarterly,monthly_target:Math.round(quarterly/3),actual,achievement,adjustment:review?.adjustment??null,adjustment_limited:review?.adjustment>p.cap,calculation_rules:Object.fromEntries(Object.keys(performanceDefaults).map(k=>[k,p[k]])),reason:review?.reason||'',status:'draft',consecutive_d:!!(eligible&&grade?.grade==='D'&&prev&&JSON.parse(prev.snapshot).grade==='D'),evidence:{contracts,meetings:activities.filter(a=>a.user_id===user.id&&a.activity_type==='线上会议'&&a.activity_date.startsWith(month)),visits:activities.filter(a=>a.user_id===user.id&&a.activity_type==='现场拜访'&&a.activity_date.startsWith(month)),opportunities:opps.filter(o=>o.owner_id===user.id&&o.created_at.slice(0,7)===month),quotes:[...quotes.filter(q=>q.user_id===user.id&&q.created_at.startsWith(month)),...activities.filter(a=>a.user_id===user.id&&a.activity_type==='对客报价'&&a.activity_date.startsWith(month)&&!quotes.some(q=>q.user_id===user.id&&q.opportunity_id===a.opportunity_id&&q.created_at.slice(0,10)===a.activity_date))]}};
 }
 
-export function assertUnsettled(db,contractId) {
+function correctionAccess(db,contractId,context){
+  if(context?.b?.data_correction!==true||!canManageContractData(context.actor))return false;
+  const contract=one(db,'SELECT owner_id FROM contracts WHERE id=?',contractId);assert(contract,'合同不存在',404);
+  assertContractDataAccess(context.actor,contract);text(context.b.reason,'资料修正原因',1000);return true;
+}
+export function assertUnsettled(db,contractId,context) {
+  if(correctionAccess(db,contractId,context))return;
   assert(!one(db,'SELECT id FROM commission_lines WHERE contract_id=? LIMIT 1',contractId),'该合同已确认提成，金额、毛利及归属已锁定',409);
 }
-export function assertOwnershipUnlocked(db,contractId) {
+export function contractLocks(db,contractId) {
+  const commissions=all(db,'SELECT DISTINCT b.id,b.period,b.status FROM commission_lines l JOIN commission_batches b ON b.id=l.batch_id WHERE l.contract_id=?',contractId);
+  const performance=all(db,"SELECT DISTINCT r.month FROM performance_reviews r,json_each(r.snapshot,'$.evidence.contracts') c WHERE r.status='confirmed' AND json_extract(c.value,'$.id')=?",contractId);
+  return {financial:!!one(db,'SELECT id FROM commission_lines WHERE contract_id=? LIMIT 1',contractId),ownership:commissions.length>0||performance.length>0,
+    periods:commissions.map(c=>c.period),performance_months:performance.map(p=>p.month),
+    message:commissions.length?'已确认提成：历史到账、金额、毛利和归属已锁定；仍可新增合法到账、维护计划及核销。':performance.length?'已确认绩效：合同归属及相关业绩字段受保护；仍可继续登记到账。':''};
+}
+export function assertOwnershipUnlocked(db,contractId,context) {
+  if(correctionAccess(db,contractId,context))return;
   assertUnsettled(db,contractId);
   assert(!one(db,"SELECT r.id FROM performance_reviews r, json_each(r.snapshot,'$.evidence.contracts') c WHERE r.status='confirmed' AND json_extract(c.value,'$.id')=? LIMIT 1",contractId),'该合同已纳入确认绩效，归属已锁定',409);
 }
 export function handleIncentives(ctx) {
   const {path,method,b,actor,db,admin,insert,update,audit,getRules}=ctx;
-  if(path==='/api/commissions/confirm'&&method==='POST') {
+  if(method!=='GET'&&(path==='/api/commissions/confirm'||path==='/api/commissions/disbursements'||/^\/api\/commissions\/\d+\/pay$/.test(path))) {
     admin(actor);
-    const preview=commissionPreview(db,getRules(),actor,b.period).previews.find(p=>p.sales_id===Number(b.sales_id)&&p.kind===b.kind);
-    assert(preview,'提成对象无效');
-    assert(preview.fingerprint===b.fingerprint,'试算已变化，请刷新后重新确认',409);
-    assert(preview.due>0&&!preview.blocked,'没有可确认的提成，或历史结算需要核对',409);
-    const id=insert('commission_batches',{sales_id:preview.sales_id,kind:preview.kind,period:preview.period,base:preview.base,rate:preview.rate,amount:preview.due,status:'confirmed',snapshot:JSON.stringify(preview),created_at:now(),confirmed_by:actor.id});
-    for(const line of preview.lines.filter(l=>l.amount>0)) insert('commission_lines',{batch_id:id,contract_id:line.contract_id,item_id:line.item_id,base:line.base,rebate_rate:line.rebate_rate,rate:line.rate,amount:line.amount,component:line.component||'legacy'});
-    audit(actor,'确认提成','commission',id,{amount:preview.due,period:preview.period,kind:preview.kind});
-    return {id,message:'提成已确认并锁定，后续新增成交将单独补算差额'};
-  }
-  const paid=path.match(/^\/api\/commissions\/(\d+)\/pay$/);
-  if(paid&&method==='POST') {
-    admin(actor);const batch=one(db,'SELECT * FROM commission_batches WHERE id=?',Number(paid[1]));
-    assert(batch,'提成记录不存在',404);assert(batch.status==='confirmed','该笔提成已登记发放',409);
-    const paid_at=validDate(b.paid_at||today(),'发放日期');assert(paid_at<=today(),'发放日期不能晚于今天');
-    update('commission_batches',batch.id,{status:'paid',paid_at,paid_note:text(b.note||'','发放备注',1000,false)});
-    audit(actor,'登记提成发放','commission',batch.id,{amount:batch.amount,paid_at});return {id:batch.id,message:'已登记提成发放'};
+    assert(false,'提成已改为实时查看，不再确认结算或登记发放',410);
   }
   if(path==='/api/performance/review'&&method==='POST') {
     admin(actor);const user=one(db,"SELECT * FROM users WHERE id=? AND role='sales' AND active=1 AND performance_enabled=1 AND business_member=1 AND developer_admin=0",Number(b.user_id));assert(user,'请选择在用且参与绩效的一线销售');

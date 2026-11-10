@@ -14,10 +14,10 @@ export function formSettings(S, type, id, options) {
   if(type==='sales-commission-policy'){
     if(S.actor.role!=='admin')return empty('无权调整提成梯度','仅管理员可以维护销售个人提成规则。');
     const p=S.rules.commission.sales_policy;
-    return formShell('调整个人提成梯度','产品回款和项目服务分别设置各档起点与 D、C、B、A 级比例。',
+    return formShell('调整个人提成梯度','产品以当月回款毛利选档并计提；开发运维以当月实际服务回款选档并计提。',
       `<div class="wide form-context">各档起点须递增；空白比例保留为待核实。修改规则后未确认的月份会重新试算，已确认结算保留原快照。</div>`+
       input('effective_month','规则生效月份',p.effective_month,'month',true)+
-      select('service_aggregation','项目服务选档范围',[['pending_contract','待确认：暂按单份合同试算'],['contract','已确认：每份合同的项目／服务金额'],['month','已确认：当月项目／服务合同金额合计']],p.service_scope_confirmed?p.service_aggregation:'pending_contract')+
+      `<input type="hidden" name="service_aggregation" value="month"><p class="form-context">开发运维包含定开、运维，固定按当月实际服务回款合计选档。实施、交付及未分类保留待核对。</p>`+
       `<div class="wide">${policyMatrix(p,'product',true)}${policyMatrix(p,'service',true)}</div>`,type,id,'保存提成梯度');
   }
   if(type==='performance-rules'){
@@ -39,8 +39,8 @@ export function formSettings(S, type, id, options) {
   if(type==='finance-rules') {
     const c=S.rules.commission;
     const pct=(key,label)=>input('commission:'+key,label,c[key]*100,'number',true,'min="0" max="100" step="0.01"');
-    return formShell('团队管理提成规则','调整团队累计周期、毛利阈值和计提比例；已确认结算保留原快照。',
-      select('commission:period','团队毛利累计周期',[['quarter','季度'],['month','月度'],['year','年度']],c.period)+select('commission:manager_id','团队管理提成负责人',S.users.filter(u=>u.role==='admin'&&u.active).map(u=>[u.id,u.name]),c.manager_id||S.users.find(u=>u.role==='admin')?.id)+input('commission:threshold','团队跳档毛利阈值（元）',c.threshold/100,'number')+pct('low_rate','团队低档比例（%）')+pct('high_rate','团队高档比例（%）')+select('commission:unlock_by_payment','团队计提口径',[['false','成交合同毛利'],['true','按到账比例解锁']],String(c.unlock_by_payment)),type,id,'保存业务规则');
+    return formShell('团队管理提成规则','月度按其他销售的实际回款毛利全额计提，排除负责人本人订单；历史结算保留原快照。',
+      select('commission:manager_id','团队管理提成负责人',S.users.filter(u=>u.role==='admin'&&u.active).map(u=>[u.id,u.name]),c.manager_id||S.users.find(u=>u.role==='admin')?.id)+input('commission:threshold','团队跳档毛利阈值（元）',c.threshold/100,'number')+pct('low_rate','团队低档比例（%）')+pct('high_rate','团队高档比例（%）')+`<p class="wide form-context">月度规则固定使用实际到账月份；历史周期仍保留原 ${esc(c.period)} 设置。阈值以下含等于使用低档，超过后全额使用高档。</p>`,type,id,'保存业务规则');
   }
   if(type==='user-mapping') {const u=S.users.find(u=>u.id===Number(id));return formShell('配置成员身份与角色','填写已核验的企业身份。角色变更后需重新登录。',input('ding_user_id','钉钉企业 userId',u.ding_user_id||'','text',false)+input('ding_union_id','钉钉 unionId（扫码登录）',u.ding_union_id||'','text',false)+select('role','业务角色',[['sales','销售'],['admin','管理者'],['pm','协作PM']],u.role),type,id);}
   if (type === "rules")

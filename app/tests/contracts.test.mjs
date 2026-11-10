@@ -25,8 +25,8 @@ test("M06-A01 手工混合合同按行项合计，未知毛利留空，不额外
   const s = (await f.request("/state", { actor })).body;
   const c = s.contracts.find((c) => c.id === r.body.id);
   assert.equal(c.amount, 10000000);
-  assert.ok(c.items.every(i=>i.margin===null&&i.rate===null));
-  assert.equal(c.lifecycle,'草稿');
+  assert.equal(c.items.find(i=>i.kind==='标品').margin,null);assert.equal(c.items.find(i=>i.kind==='实施').margin,4000000);assert.ok(c.items.every(i=>i.rate===null));
+  assert.equal(c.lifecycle,'已归档');
   assert.equal(c.opportunity_id, null);
   assert.equal(s.opportunities.length, before.opportunities.length);
 });

@@ -47,7 +47,7 @@ export function createContractAnalysis({db,ai,scoped,audit}) {
           const output=await ai.extractContract({name:before.attachment.filename,base64:before.bytes.toString('base64')});
           assert(output?.model===AI_MODEL,'合同识别模型不一致',502);
           result=normalizeContractExtraction(output.result,{amountsInCents:true});state='ready';
-          reason='仅保存原件识别结果，请核对原文；未修改合同金额、付款计划或到账记录。';
+          reason='仅保存原件识别结果，请核对原文；未修改合同金额、收款计划或到账记录。';
         }catch(error){
           reason=error.status===422?'合同附件解析失败或超过图片/文本限制，请检查原件后重试；原附件完整保留。':error.status===429?'AI正在处理其他资料，请稍后重试；尚未识别此附件。':'合同附件AI提取失败或结果无法校验，请稍后重试；未修改合同或回款记录。';
         }

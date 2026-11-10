@@ -71,7 +71,8 @@ export function createApp({
           let length = 0;
           for await (const chunk of req) {
             length += chunk.length;
-            if (length > (url.pathname==='/api/ai/intake'?30*1024*1024:1000000)) throw new AppError("提交内容过大", 413);
+            const upload=/^\/api\/contracts\/\d+\/(attachments|archive)$/.test(url.pathname);
+            if (length > (url.pathname==='/api/ai/intake'?30*1024*1024:upload?16*1024*1024:1000000)) throw new AppError("提交内容过大", 413);
             chunks.push(chunk);
           }
           try {

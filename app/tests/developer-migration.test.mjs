@@ -19,7 +19,7 @@ test('真实旧版结构升级保留开发者授权、原业务与钉钉会话�
   const before=Object.fromEntries(tables.map(table=>[table,all(db,'SELECT * FROM '+table)]));
   db.close();db=null;db=openDatabase(filename);
   assert.equal(one(db,'SELECT COUNT(*) n FROM schema_version WHERE version=4').n,1);
-  assert.equal(one(db,'SELECT MAX(version) n FROM schema_version').n,31);
+  assert.equal(one(db,'SELECT MAX(version) n FROM schema_version').n,35);
   const addedTables=['customer_profiles','contract_attachment_analyses'];
   for(const table of addedTables)assert.equal(one(db,'SELECT COUNT(*) n FROM '+table).n,0,table+' 不自动生成旧数据');
   const queueTables=['company_profile_jobs','company_profile_queue_control'];

@@ -70,7 +70,7 @@ test('读取企业信息期间客户归属或主体变化时拒绝保存旧结�
 });
 
 test('阶段建议只在点击后运行，同一客户多商机分开，幂等且不写跟进或修改阶段',async t=>{
-  const seen=[];const f=await fixture(t,{salesAdviceProvider:{configured:true,model:'qwen/qwen3.8-max',analyze:async input=>{seen.push(input);return advice();}}}),actor=await f.login(1);
+  const seen=[];const f=await fixture(t,{salesAdviceProvider:{configured:true,model:'deepseek-v4-1-flash',analyze:async input=>{seen.push(input);return advice();}}}),actor=await f.login(1);
   const {cid,oid}=await makeOpp(f,actor);const second=await f.request('/opportunities',{actor,method:'POST',body:opp(cid,{name:'另一条售卖产品 R2'})});assert.equal(second.status,200);
   run(f.db,"INSERT INTO activities(opportunity_id,user_id,source,activity_type,summary,action,activity_date,created_at) VALUES(?,1,'手动','手动跟进',?,'','2026-11-02','2026-11-02')",second.body.id,'第二商机独有资料不应混入第一商机');
   await f.request('/state',{actor});assert.equal(seen.length,0);
@@ -98,9 +98,9 @@ test('AI返回后重新核对归属权限，缓存命中也不能绕过撤权',a
 });
 
 test('分析服务和企查查异常脱敏，结构不完整的模型结果不能伪装成功',async()=>{
-  const ai=createSalesAdviceAI({env:{PPIO_API_KEY:'fixture-key'},fetcher:async()=>{throw new Error('Bearer fixture-secret');}});
+  const ai=createSalesAdviceAI({env:{AI_API_KEY:'fixture-key'},fetcher:async()=>{throw new Error('Bearer fixture-secret');}});
   await assert.rejects(ai.analyze({}),e=>e.status===502&&!/fixture-secret/.test(e.message));
-  const bad=createSalesAdviceAI({env:{PPIO_API_KEY:'fixture-key'},fetcher:async()=>new Response(JSON.stringify({choices:[{finish_reason:'stop',message:{content:'{"stage_assessment":"空建议"}'}}]}))});
+  const bad=createSalesAdviceAI({env:{AI_API_KEY:'fixture-key'},fetcher:async()=>new Response(JSON.stringify({choices:[{finish_reason:'stop',message:{content:'{"stage_assessment":"空建议"}'}}]}))});
   await assert.rejects(bad.analyze({}),e=>e.status===502);
   assert.match(SALES_ADVICE_SYSTEM,/15年以上/);assert.match(SALES_ADVICE_SYSTEM,/参保人数不等于/);
 });
@@ -112,7 +112,7 @@ test('客户详细信息独立呈现状态和来源，外部字符串转义，�
 
 test('AI接收预览不会查询企业，确认新建后同请求读取一次，重复确认不再外发',async t=>{
   let calls=0;
-  const f=await fixture(t,{companyProfileProvider:{configured:true,provider:'隔离企业接口',lookup:async c=>{calls++;return profile(c.name);}},aiProvider:{configured:true,model:'qwen/qwen3.8-max',prepare:async()=>({model:'qwen/qwen3.8-max',summary:'隔离新客户',questions:[],usage:{},operations:[{type:'customer',action:'create',ref:'new_customer',source_file:'粘贴内容',data:customer({name:'AI确认后才查询的企业'}),evidence:'用户提供企业名称与负责人'}]})}}),actor=await f.login(1);
+  const f=await fixture(t,{companyProfileProvider:{configured:true,provider:'隔离企业接口',lookup:async c=>{calls++;return profile(c.name);}},aiProvider:{configured:true,model:'deepseek-v4-1-flash',prepare:async()=>({model:'deepseek-v4-1-flash',summary:'隔离新客户',questions:[],usage:{},operations:[{type:'customer',action:'create',ref:'new_customer',source_file:'粘贴内容',data:customer({name:'AI确认后才查询的企业'}),evidence:'用户提供企业名称与负责人'}]})}}),actor=await f.login(1);
   const draft=await f.request('/ai/intake',{actor,method:'POST',body:{text:'录入隔离的新客户资料'}});assert.equal(draft.status,200);assert.equal(draft.body.valid,true,JSON.stringify(draft.body));assert.equal(calls,0);assert.equal(one(f.db,'SELECT count(*) n FROM customer_profiles').n,0);
   const batch=(await f.request('/ai/batches/'+draft.body.id,{actor})).body,key=randomUUID(),body={version:batch.version,acknowledged:true};
   const confirmed=await f.request('/ai/batches/'+batch.id+'/confirm',{actor,method:'POST',body,key});assert.equal(confirmed.status,200);assert.equal(calls,1);assert.equal(one(f.db,'SELECT state FROM customer_profiles WHERE customer_id=?',confirmed.body.result[0].id).state,'ready');
@@ -121,7 +121,7 @@ test('AI接收预览不会查询企业，确认新建后同请求读取一次，
 
 test('企业详情后续读取失败保留上次来源资料，AI不把失败快照当当前已核实事实',async t=>{
   let fail=false,captured;
-  const f=await fixture(t,{companyProfileProvider:{configured:true,provider:'隔离企业接口',lookup:async c=>{if(fail)throw new Error('上游超时');return profile(c.name);}},salesAdviceProvider:{configured:true,model:'qwen/qwen3.8-max',analyze:async c=>{captured=c;return advice();}}}),actor=await f.login(1);
+  const f=await fixture(t,{companyProfileProvider:{configured:true,provider:'隔离企业接口',lookup:async c=>{if(fail)throw new Error('上游超时');return profile(c.name);}},salesAdviceProvider:{configured:true,model:'deepseek-v4-1-flash',analyze:async c=>{captured=c;return advice();}}}),actor=await f.login(1);
   const {cid,oid}=await makeOpp(f,actor);fail=true;
   const refresh=await f.request('/customers/'+cid+'/company-profile/refresh',{actor,method:'POST',body:{}});assert.equal(refresh.status,200);assert.equal(refresh.body.company_profile.state,'failed');assert.equal(refresh.body.company_profile.provider,'隔离企业接口');assert.equal(refresh.body.company_profile.details.employee_scale,'100–199人');assert.match(refresh.body.company_profile.reason,/保留上次/);
   assert.equal((await f.request('/opportunities/'+oid+'/ai-advice',{actor,method:'POST',body:{}})).status,200);assert.equal(captured.customer.verified_company_profile,null);assert.equal(captured.customer.profile_state,'failed');
@@ -129,9 +129,9 @@ test('企业详情后续读取失败保留上次来源资料，AI不把失败快
 
 test('管理员AI确认合同附件后自动识别一次，预览及重复回执不识别，合同金额和付款不被提案写入',async t=>{
   let calls=0,f;
-  const ai={configured:true,model:'qwen/qwen3.8-max',prepare:async()=>({model:'qwen/qwen3.8-max',summary:'保存隔离合同原件',questions:[],usage:{},operations:[{type:'contract_attachment',action:'create',ref:'attachment1',source_file:'核对合同.txt',data:{contract_id:1,source_file:'核对合同.txt'},evidence:'明确保存当前合同原件'}]}),extractContract:async file=>{
+  const ai={configured:true,model:'deepseek-v4-1-flash',prepare:async()=>({model:'deepseek-v4-1-flash',summary:'保存隔离合同原件',questions:[],usage:{},operations:[{type:'contract_attachment',action:'create',ref:'attachment1',source_file:'核对合同.txt',data:{contract_id:1,source_file:'核对合同.txt'},evidence:'明确保存当前合同原件'}]}),extractContract:async file=>{
     calls++;assert.equal(f.db.isTransaction,false);assert.equal(file.name,'核对合同.txt');
-    return {model:'qwen/qwen3.8-max',result:{total_amount:880000,payment_stages:[{name:'首款',amount:880000,due_date:null,condition:'签约后支付',evidence:'首款人民币8800元'}],summary:'独立识别结果',questions:[]}};
+    return {model:'deepseek-v4-1-flash',result:{total_amount:880000,payment_stages:[{name:'首款',amount:880000,due_date:null,condition:'签约后支付',evidence:'首款人民币8800元'}],summary:'独立识别结果',questions:[]}};
   }};
   f=await fixture(t,{aiProvider:ai});const actor=await f.login(1),before=one(f.db,'SELECT amount FROM contracts WHERE id=1').amount,payments=one(f.db,'SELECT count(*) n FROM payments').n;
   const draft=await f.request('/ai/intake',{actor,method:'POST',body:{text:'保存当前合同附件',files:[{name:'核对合同.txt',base64:Buffer.from('总金额8800元；签约后支付首款8800元').toString('base64')}]}});assert.equal(draft.status,200);assert.equal(draft.body.valid,true);assert.equal(calls,0);

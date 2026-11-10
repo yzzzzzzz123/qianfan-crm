@@ -4,7 +4,7 @@ import {contractSplit} from '../sales-policy.mjs';
 
 export function commissionInputs(db,month){
  const users=all(db,"SELECT id,name,role FROM users WHERE active=1 AND business_member=1 AND developer_admin=0 AND role IN('sales','admin') ORDER BY id");
- const contracts=all(db,"SELECT * FROM contracts WHERE retired_at IS NULL AND lifecycle!='草稿' ORDER BY id"),items=all(db,'SELECT * FROM contract_items'),payments=all(db,'SELECT * FROM payments'),sources=qfcrmSourceFields(db).contracts;
+ const contracts=all(db,"SELECT * FROM contracts WHERE retired_at IS NULL AND lifecycle!='草稿' ORDER BY id"),items=all(db,'SELECT * FROM contract_items WHERE retired_at IS NULL'),payments=all(db,'SELECT * FROM payments'),sources=qfcrmSourceFields(db).contracts;
  const claims=[];
  for(const c of contracts){
   const f=sources.get(c.id),rows=items.filter(i=>i.contract_id===c.id),receipts=payments.filter(p=>p.contract_id===c.id);

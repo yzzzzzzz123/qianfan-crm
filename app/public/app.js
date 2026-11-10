@@ -1,6 +1,15 @@
+import {createPresenceController} from './modules/developer-presence.js';
+import {canManageContractData} from './modules/contract-access.js';
+import {expenseWorkspace,expenseForm,expenseRequest} from './modules/contract-expenses.js';
+import {recycleWorkspace,recyclePreviewForm,mountRecycleWorkspace} from './modules/record-recycle.js';
+import {reviewList,mountReviewList,reviewEditor,collectReviewChange,reviewQueue,reviewPreview,settlementReview} from './modules/data-review.js';
+import {installProfitEditors} from './modules/profit-editor.js';
+import {formShell,textarea} from './ui.js';
+import {installSearchSelects} from './modules/search-select.js';
 import {mountMaintenance,maintenancePayload,bindMaintenanceActions} from './modules/contract-maintenance.js';
 import {installTablePanning} from './modules/table-pan.js';
-import {collectionDetail} from './modules/contract-workflow.js';
+import {collectionDetail,contractWorkspace,contractHistoryList} from './modules/contract-workflow.js';
+import {mountCollectionForm,syncCollectionForm,showCollectionError,contractFile} from './modules/collection-controller.js';
 import { api, setCsrf, setSimulationIdentity } from "./api.js";
 import { sessionControl, bindIdentityPicker } from './modules/developer-session.js';
 import {bindIntakeUpload,restoreIntakeUpload,setIntakeBusy,clearIntakeUpload} from './modules/intake-upload.js';
@@ -11,6 +20,8 @@ import {followupFilters,reportMonthForPage} from './modules/shared.js';
 import {createMinutesController} from './modules/minutes.js';
 import {companyProfileFeedback} from './modules/customers.js';
 import {salesPolicyFromForm} from './modules/commission-policy.js';
+import {shiftCommissionPeriod,currentCommissionPeriod} from './modules/commission-period.js';
+import {buildCommissionExport,commissionIssueRows} from './modules/commission-view-model.js';
 import {
   esc,
   icon,
@@ -34,6 +45,8 @@ import {
   timeline,
 } from "./views.js";
 
+installSearchSelects();
+installProfitEditors();
 bindIntakeUpload();
 installTablePanning();
 bindMaintenanceActions(()=>S);
@@ -48,6 +61,8 @@ let reportMonth='';
 let stateRequest=0;
 let commissionPeriod='';
 let identitySwitchBusy=false;
+let expenseData=null,recycleFilters={},reviewReason='';
+const reviewChanges=new Map();
 const profileRequests=new Map();
 const dialog = document.querySelector("#dialog");
 const getP = () =>
@@ -72,11 +87,17 @@ const toast = (msg, error = false) => {
   toastTimer = setTimeout(() => el.classList.remove("visible"), 4500);
 };
 const minutesController=createMinutesController({getS:()=>S,getP,openHtml,content,reload,toast});
+async function showExpenses(contractId){expenseData=await api('/contracts/'+contractId+'/expenses');openHtml(expenseWorkspace(S,expenseData),true);}
+async function showRecycle(filters={}){recycleFilters=filters;const query=new URLSearchParams(Object.entries(filters).filter(([,v])=>v!==''&&v!=null));const data=await api('/records/recycle?'+query);openHtml(recycleWorkspace(S,data),true);mountRecycleWorkspace(dialog.querySelector('.recycle-workspace'),{search:showRecycle,preview:showRecyclePreview,onError:e=>toast(e.message,true)});}
+async function showRecyclePreview({type,id}){const data=await api('/records/recycle/preview?'+new URLSearchParams({type,id}));openHtml(recyclePreviewForm(S,data));}
+async function showReview(){const data=await api('/data-review');openHtml(reviewList(S,data,[...reviewChanges.values()]),true);}
+const livePresence=createPresenceController({getState:()=>S,getPage:()=>current,api});
 function content() {
   minutesController.beforeRender();
   document.querySelector("#content").innerHTML = renderPage(S, getP());
   void minutesController.mountFilters();
   if(current==='intake')restoreIntakeUpload();
+  livePresence.mount();
   document.title = `千帆 CRM · ${pages[current][0]}`;
 }
 function render() {
@@ -105,6 +126,32 @@ async function reload() {
   if(S.developer)setSimulationIdentity(S.actor.id);
   render();
 }
+let commissionRefreshing=false;
+const commissionDetailKey=detail=>{
+  const card=detail.closest('[data-sales-id]');
+  if(card)return `person:${card.dataset.salesId}:${card.dataset.commissionKind}:${detail.className}`;
+  const section=detail.closest('section'),siblings=[...(section?.querySelectorAll('details')||[])];
+  return `${section?.className}:${detail.className}:${siblings.indexOf(detail)}`;
+};
+async function refreshRealtimeCommissions(manual=false){
+  if(commissionRefreshing||!S||current!=='commissions'||document.hidden||dialog.open||panel)return;
+  if(!manual&&(document.activeElement?.matches('input,select,textarea')||document.querySelector('.commission-live [aria-expanded="true"]')))return;
+  commissionRefreshing=true;
+  const actor=S.actor.id,period=S.commission.period,scrollY=window.scrollY;
+  const opened=new Map([...document.querySelectorAll('.commission-live details')].map(detail=>[commissionDetailKey(detail),detail.open]));
+  try{
+    await reload();
+    if(current==='commissions'&&S.actor.id===actor&&S.commission.period===period){
+      for(const detail of document.querySelectorAll('.commission-live details'))if(opened.has(commissionDetailKey(detail)))detail.open=opened.get(commissionDetailKey(detail));
+      window.scrollTo(0,scrollY);
+    }
+    if(manual)toast('实时提成已更新');
+  }catch(error){if(manual)toast(error.message,true);}
+  finally{commissionRefreshing=false;}
+}
+setInterval(()=>{void refreshRealtimeCommissions();},15000);
+window.addEventListener('focus',()=>{void refreshRealtimeCommissions();});
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)void refreshRealtimeCommissions();});
 let profilePolling=false,lastProfilePoll=0;
 setInterval(async()=>{
   if(profilePolling||!S||document.hidden||!(current==='customers'||panel?.type==='customer')||dialog.querySelector('form'))return;
@@ -122,42 +169,44 @@ setInterval(async()=>{
 function openHtml(html, drawer = false) {
   dialog.className = drawer ? "drawer" : "form-dialog";
   dialog.innerHTML = html;
+  const reviewRoot=dialog.querySelector('.review-workspace');if(reviewRoot)mountReviewList(reviewRoot);
+  if(!dialog.querySelector('[data-action="close"]'))dialog.insertAdjacentHTML('afterbegin',`<button type="button" class="icon-btn empty-close" data-action="close" aria-label="关闭">${icon('close')}</button>`);
   if (!dialog.open) dialog.showModal();
   dialog.scrollTop = 0;
 }
-function openPanel(type, id) {
-  panel = { type, id: Number(id) };
+function openPanel(type, id, options={}) {
+  if(['contract','collection'].includes(type))options={...options,tab:options.tab||(type==='collection'?'payments':'overview')};
+  panel = { type, id: Number(id),...options };
   formReturn = null;
   const html = {
     customer: customerDetail,
     opportunity: opportunityDetail,
     contract: contractDetail,
     collection: collectionDetail,
-  }[type](S, id);
+  }[type](S, id,options);
   openHtml(html, true);
+  if(Number.isFinite(options.scrollTop))dialog.scrollTop=options.scrollTop;
 }
 function openForm(type, id = "", quarter = "") {
-  formReturn = panel;
+  formReturn = panel?{...panel,scrollTop:dialog.scrollTop}:null;
   openHtml(formContent(S, type, id, quarter), false);
-  if(['contract-maintain','contract-project'].includes(type))mountMaintenance(dialog.querySelector('form'));
+  if(['contract-maintain','contract-items'].includes(type)){
+    const form=dialog.querySelector('form'),record=S.contracts.find(c=>c.id===Number(id));
+    if(form){form.dataset.locked='false';mountMaintenance(form,record);}
+  }
   if(type==='target'&&dialog.querySelector('form[data-form="target"]'))syncTargetForm(dialog.querySelector('form'),S);
   if(['payment','payment-maintain'].includes(type)){syncPaymentFields(dialog.querySelector('form'));syncPaymentContext(dialog.querySelector('form'));}
   if(type==='quote')syncQuoteTotal(dialog.querySelector('form'));
   if(type==='contact')syncContactMethods(dialog.querySelector('form'));
   if(type==='activity'&&dialog.querySelector('form'))dialog.querySelector('form').dataset.contextOpportunity=id||'';
+  mountCollectionForm(dialog.querySelector('form'),S);
+  if(S.actor.role==='admin'&&['contract-maintain','contract-meta','contract-items','payment-maintain','payment-allocation','item-margin','contract-delete'].includes(type))dialog.querySelector('.form-error')?.insertAdjacentHTML('afterend','<div class="wide admin-repair-note">管理员数据修正：请填写处理原因；当前汇总和未确认试算会更新，已确认结算快照保留。</div>');
 }
 function syncPaymentFields(form) {
-  if(!form)return;
-  const received=form.elements.status.value==='已到账';
-  const prior=form.dataset.form==='payment-maintain'?S.contracts.flatMap(c=>c.payments).find(p=>p.id===Number(form.dataset.id)):null;
-  const unchanged=prior&&form.elements.status.value===prior.status&&Number(form.elements.amount.value)===prior.amount/100;
-  form.elements.pay_date.required=received&&!(unchanged&&!prior.pay_date);
-  form.elements.promise_date.required=!received&&!(unchanged&&!prior.promise_date);
+  if(form)syncCollectionForm(form,S);
 }
 function syncPaymentContext(form){
-  const box=form?.querySelector('#payment-contract-context');if(!box)return;
-  const c=S.contracts.find(c=>c.id===Number(form.elements.contract_id.value));
-  box.textContent=c?`${c.name} · 合同金额 ${plainMoney(c.amount)} · 已回款 ${plainMoney(c.collected)} · 未回款 ${plainMoney(c.outstanding)} · 销售小二 ${S.users.find(u=>u.id===c.owner_id)?.name||'待补充'}`:'请选择系统中已有合同';
+  if(form)syncCollectionForm(form,S);
 }
 function syncQuoteTotal(form) {
   if(!form)return;
@@ -181,7 +230,7 @@ function close() {
   if (formReturn) {
     const p = formReturn;
     formReturn = null;
-    openPanel(p.type, p.id);
+    openPanel(p.type, p.id,p);
   } else {
     dialog.close();
     panel = null;
@@ -196,6 +245,36 @@ function navigate(view, filters = {}) {
   Object.assign(getP(), filters);
   if (location.hash.slice(1) !== view) location.hash = view;
   else render();
+}
+async function openCommissionIssue(el){
+  const salesId=Number(el.dataset.salesId),contractId=Number(el.dataset.id)||null;
+  const issue=commissionIssueRows(S,getP()).find(row=>Number(row.sales_id)===salesId&&row.period===el.dataset.period&&String(row.code||'')===String(el.dataset.issueCode||'')&&(!contractId||Number(row.contract_id)===contractId||row.contracts?.some(c=>Number(c.id)===contractId)));
+  if(!issue){toast('该事项已更新，请刷新后查看',true);return;}
+  if(S.actor.role==='pm'||S.actor.role!=='admin'&&(issue.responsibility==='admin'||salesId!==S.actor.id)){
+    toast('这项信息需要管理员处理',true);return;
+  }
+  const action=issue.action;
+  if(action==='sales-policy'){
+    if(S.actor.role!=='admin'){toast('提成规则由管理员维护',true);return;}
+    openForm('sales-commission-policy');return;
+  }
+  if(action==='performance'){
+    if(S.actor.role!=='admin'){toast('绩效信息由管理员维护',true);return;}
+    reportMonth=/^\d{4}-\d{2}$/.test(issue.period)?issue.period:S.today.slice(0,7);
+    current='performance';getP().owner=String(salesId);
+    history.replaceState(null,'','#performance');
+    await reload();
+    const performance=S.performance.find(p=>p.user_id===salesId);
+    if(!performance){toast('该成员的历史绩效需在团队管理中核对',true);return;}
+    if(!performance.quarterly_target){openForm('target',salesId,`${reportMonth.slice(0,4)}Q${Math.ceil(Number(reportMonth.slice(5,7))/3)}`);return;}
+    if(performance.status!=='confirmed')openForm('performance-review',salesId);
+    return;
+  }
+  const contract=S.contracts.find(c=>c.id===(contractId||issue.contract_id));
+  if(!contract||S.actor.role==='sales'&&contract.owner_id!==S.actor.id){toast('当前账号无法维护这份合同',true);return;}
+  const tab=action==='payment-allocation'?'payments':'overview';
+  openPanel('contract',contract.id,{tab});
+  if(action==='contract-items'&&canManageContractData(S))openForm('contract-items',contract.id);
 }
 async function showLogin(message = "") {
   panel = null;
@@ -241,6 +320,50 @@ document.addEventListener("click", async (e) => {
     }
     if(action==='dingtalk-login') {const r=await api('/auth/dingtalk/start');location.assign(r.url);return;}
     if(action==='developer-select') {await switchIdentity(id);return;}
+    if(action==='workflow-view'){
+      if(!['daily','ledger'].includes(id))return;
+      getP().tableView=id;content();return;
+    }
+    if(action==='workflow-filter'){getP().workflowFilter=id||'';content();return;}
+    if(action==='workspace-tab'){
+      if(!['overview','payments','attachments','history'].includes(id))return;
+      if(panel)panel.tab=id;
+      for(const section of dialog.querySelectorAll('[data-workspace-panel]'))section.hidden=section.dataset.workspacePanel!==id;
+      for(const tab of dialog.querySelectorAll('[data-action="workspace-tab"]')){tab.classList.toggle('active',tab.dataset.id===id);tab.setAttribute('aria-selected',String(tab.dataset.id===id));}
+      return;
+    }
+    if(action==='receipt-fill-balance'){
+      const form=el.closest('form'),p=S.contracts.flatMap(c=>c.payments).find(p=>p.id===Number(id));
+      if(form&&p){form.elements.amount.value=(p.remaining_amount??p.amount)/100;form.elements.amount.dispatchEvent(new Event('input',{bubbles:true}));form.elements.amount.focus();}return;
+    }
+    if(action==='contract-expenses'){await showExpenses(id);return;}
+    if(action==='expense-restore'){await showRecyclePreview({type:'expense',id});return;}
+    if(['expense-new','expense-edit','expense-delete'].includes(action)){
+      const contractId=action==='expense-new'?Number(id):expenseData?.contract.id;
+      if(!contractId)throw new Error('请从合同费用支出列表选择记录');
+      expenseData=await api('/contracts/'+contractId+'/expenses');openHtml(expenseForm(S,action,id,expenseData));return;
+    }
+    if(action==='admin-recycle'||action==='records-recycle'){await showRecycle(action==='admin-recycle'?{contract_id:id}:{});return;}
+    if(action==='admin-restore-contract'||action==='admin-restore-item'||action==='admin-restore-record'){
+      const type=action==='admin-restore-contract'?'contract':action==='admin-restore-item'?'item':null;
+      if(type){await showRecyclePreview({type,id});return;}
+      await showRecycle({});return;
+    }
+    if(action==='data-review'||action==='review-list'){await showReview();return;}
+    if(action==='review-contract'){const data=await api('/data-review?contract_id='+id);openHtml(reviewEditor(S,{...data.detail,review_change:reviewChanges.get(Number(id))}));return;}
+    if(action==='review-queue'||action==='review-open-queue'){openHtml(reviewQueue([...reviewChanges.values()],reviewReason),true);return;}
+    if(action==='review-remove'){reviewChanges.delete(Number(id));openHtml(reviewQueue([...reviewChanges.values()],reviewReason),true);return;}
+    if(action==='settlement-review'){const data=await api('/settlement-review'+(id?'?contract_id='+id:''));openHtml(settlementReview(S,data),true);return;}
+    if(action.startsWith('admin-delete-')||action.startsWith('admin-restore-')||action==='admin-resume-contract'){
+      const routes={'admin-restore-plan':['/payments/'+id+'/reopen','POST','恢复收款计划'],'admin-restore-item':['/items/'+id+'/restore','POST','恢复明细'],'admin-delete-payment':['/payments/'+id,'DELETE','删除回款／计划'],'admin-delete-attachment':['/attachments/'+id,'DELETE','删除合同附件'],'admin-restore-record':['/record-recycle/'+id+'/restore','POST','恢复记录'],'admin-restore-contract':['/contracts/'+id+'/restore','POST','恢复合同'],'admin-resume-contract':['/contracts/'+id+'/resume','POST','恢复履约']};
+      const [path,method,title]=routes[action];openHtml(formShell(title,'数据处理：保留原因和历史记录，保存后重新核对当前汇总。',`<input type="hidden" name="path" value="${path}"><input type="hidden" name="method" value="${method}">`+textarea('reason','处理原因','',true)+`<label class="wide"><input type="checkbox" name="confirmed" required>确认本次处理，历史记录继续保留</label>`,'admin-record',id,title));return;
+    }
+    if(action==='contract-history'){
+      const result=await api('/contracts/history');panel=null;formReturn=null;openHtml(contractHistoryList(S,result.contracts),true);return;
+    }
+    if(action==='contract-history-detail'){
+      const result=await api('/contracts/'+id+'/history');panel=null;formReturn=null;openHtml(contractWorkspace(S,result,{readonly:true,context:'history'}),true);return;
+    }
     if(action==='manual-entry') {
       const choices=manualChoices(S,getP());
       if(choices.length===1)openForm(choices[0].type,choices[0].id??'');
@@ -252,10 +375,23 @@ document.addEventListener("click", async (e) => {
       if(!choice||!manualFormRoles[choice.type]?.includes(S.actor.role))throw new Error('当前账号不能新建此类记录');
       openForm(choice.type,choice.id??'');return;
     }
-    if(['contract-delete','payment-maintain','contract-maintain','contract-project','item-margin','payment-plan','contract-extract','collection-receive'].includes(action)){openForm(action,id);return;}
+    if(['contract-delete','contract-meta','contract-items','contract-upload','contract-terminate','payment-void','payment-reconcile','payment-maintain','contract-maintain','contract-project','item-margin','payment-plan','contract-extract','collection-receive'].includes(action)){openForm(action,id);return;}
     if(action==='collection'){openPanel('collection',id);return;}
     if(action==='contract-collections'){if(dialog.open)dialog.close();panel=null;formReturn=null;navigate('collections',{contractId:Number(id),q:'',owner:'',stage:'',level:'',customerLevel:'',saleType:'',from:'',to:'',risk:''});return;}
     if(action==='commission-last-month'){const date=new Date(S.today+'T12:00:00Z');date.setUTCDate(1);date.setUTCMonth(date.getUTCMonth()-1);commissionPeriod=date.toISOString().slice(0,7);await reload();return;}
+    if(['commission-previous-period','commission-next-period','commission-current-period'].includes(action)){
+      const selected=S.commission.period||S.today.slice(0,7);
+      commissionPeriod=action==='commission-current-period'?currentCommissionPeriod(selected,S.today):shiftCommissionPeriod(selected,action==='commission-previous-period'?-1:1);
+      await reload();return;
+    }
+    if(action==='commission-issue'){await openCommissionIssue(el);return;}
+    if(action==='commission-export-choose'){
+      openHtml(`<header class="dialog-head"><div><h2>导出提成数据</h2><p>${esc(S.commission.period)} · 按当前人员、搜索和状态筛选导出</p></div><button class="icon-btn" data-action="close" aria-label="关闭">${icon('close')}</button></header><div class="dialog-body commission-export-options"><button class="btn secondary" data-action="commission-export-summary">导出人员汇总</button><p>按销售和实际计算周期列示实时金额。</p><button class="btn secondary" data-action="commission-export-detail">导出合同明细</button><p>核对合同、基数、比例与当前计提金额。</p><button class="btn secondary" data-action="commission-export-issues">导出待完善清单</button><p>列出问题、责任人与建议处理方式，方便集中补资料。</p></div>`);return;
+    }
+    if(['commission-export-summary','commission-export-detail','commission-export-issues'].includes(action)){
+      exportList('commissions',action==='commission-export-detail'?'detail':action==='commission-export-issues'?'issues':'summary');return;
+    }
+    if(action==='commission-refresh'){await refreshRealtimeCommissions(true);return;}
     if(action==='collections-clear'){getP().contractId='';content();return;}
     if(action==='opportunity-advice'){
       const selected=S.opportunities.find(o=>o.id===Number(id));if(!selected)throw new Error('商机不存在');
@@ -278,9 +414,8 @@ document.addEventListener("click", async (e) => {
       try{const result=await api('/company-profiles/query-all',{method:'POST',body:{}});await reload();toast(result.pause_reason||'已手动启动剩余资料查询，进度会自动更新',!!result.pause_reason);}
       finally{if(el.isConnected)el.disabled=false;}return;
     }
-    if(action==='archive-contract'){if(S.actor.role!=='admin')throw new Error('仅管理员可归档合同');openForm('archive-contract',id);return;}
+    if(action==='archive-contract'){if(!canManageContractData(S))throw new Error('当前角色不能确认合同签署');openForm('archive-contract',id);return;}
     if(action==='payment-allocation'){openForm('payment-allocation',id);return;}
-    if(action==='commission-pay'){openForm('commission-pay',id);return;}
     if(action==='record-attachment'){downloadFile(await api('/attachments/'+id));return;}
     if(Object.hasOwn(manualCreateActions,action)){openForm(manualCreateActions[action],id||'');return;}
     if(action==='ai-destination') {
@@ -291,7 +426,7 @@ document.addEventListener("click", async (e) => {
     }
     if(action==='ai-start'||action==='maintenance-attachments'||aiDataActions.has(action)) {
       const intent=action==='maintenance-attachments'?'edit-contract':el.dataset.intent||action;
-      const names={'edit-customer':'客户','new-contact':'客户','edit-contact':'联系人','edit-opportunity':'商机','new-activity':'商机','new-quote':'商机',convert:'商机','new-payment':'合同','edit-contract':'合同','edit-item':'合同行项','receive-payment':'付款计划','edit-user-mapping':'成员','toggle-user':'成员','commission-pay':'提成','payment-checkpoint':'付款计划'};
+      const names={'edit-customer':'客户','new-contact':'客户','edit-contact':'联系人','edit-opportunity':'商机','new-activity':'商机','new-quote':'商机',convert:'商机','new-payment':'合同','edit-contract':'合同','edit-item':'合同行项','receive-payment':'收款计划','edit-user-mapping':'成员','toggle-user':'成员','commission-pay':'提成','payment-checkpoint':'收款计划'};
       const context=id?{intent,id:Number(id),label:`${names[intent]||'业务记录'}维护`}:{intent,label:'资料识别与维护'};
       if(dialog.open)dialog.close();panel=null;formReturn=null;
       navigate('intake');getP().intakeContext=context;getP().batch=null;getP().previousBatch=null;content();return;
@@ -324,7 +459,7 @@ document.addEventListener("click", async (e) => {
       openPanel(action, id);
       return;
     }
-    const forms = { 'sales-commission-policy':'sales-commission-policy','finance-rules':'finance-rules','stage-rules':'rules','document-templates':'document-templates','performance-rules':'performance-rules','customer-level':'customer-level','customer-levels':'customer-levels','commission-confirm':'commission-confirm', 'performance-review':'performance-review', target:'target' };
+    const forms = { 'sales-commission-policy':'sales-commission-policy','finance-rules':'finance-rules','stage-rules':'rules','document-templates':'document-templates','performance-rules':'performance-rules','customer-level':'customer-level','customer-levels':'customer-levels','performance-review':'performance-review', target:'target' };
     if (forms[action]) {
       openForm(forms[action], id, el.dataset.quarter||'');
       return;
@@ -353,6 +488,7 @@ document.addEventListener("click", async (e) => {
         risk: "",
         sort: "",
         from:'',to:'',source:'',saleType:'',customerLevel:'',
+        workflowFilter:'',
       });
       content();
       return;
@@ -405,6 +541,7 @@ document.addEventListener("click", async (e) => {
     }
     if (action === "logout") {
       await api("/auth/logout", { method: "POST", body: {} });
+      livePresence.stop();
       setSimulationIdentity('');
       setCsrf("");
       await showLogin();
@@ -472,9 +609,11 @@ document.addEventListener("submit", async (e) => {
   if(form.dataset.form.startsWith('minutes-')){try{await minutesController.submit(form);}catch(err){toast(err.message,true);}return;}
   const type = form.dataset.form,
     id = Number(form.dataset.id);
+  if(type==='locked-record'){close();return;}
   if(form.querySelector('[type=submit]').disabled)return;
   const b = Object.fromEntries(new FormData(form));
   const submittedPage=getP();
+  const submittedScroll={top:window.scrollY,left:document.querySelector('.workflow-ledger-table')?.parentElement.scrollLeft||0};
   const submit = form.querySelector("[type=submit]");
   const label = submit.innerHTML;
   const error = form.querySelector(".form-error");
@@ -482,6 +621,10 @@ document.addEventListener("submit", async (e) => {
   submit.disabled = true;
   submit.innerHTML = '<span class="loader mini"></span> 正在保存…';
   try {
+    if(type==='review-stage'){const change=collectReviewChange(form);reviewChanges.set(change.contract_id,change);openHtml(reviewQueue([...reviewChanges.values()],reviewReason),true);toast('已加入待核对清单，尚未保存业务数据');return;}
+    if(type==='review-preview'){const changes=JSON.parse(b.changes);reviewReason=b.reason;const result=await api('/data-review/preview',{method:'POST',body:{changes,reason:b.reason},key:form.dataset.key});openHtml(reviewPreview(result,changes,b.reason),true);return;}
+    if(type==='review-apply'){if(b.confirmed!=='on')throw new Error('请核对预览并确认');const payload=JSON.parse(b.payload);const result=await api('/data-review/apply',{method:'POST',body:payload,key:form.dataset.key});reviewChanges.clear();reviewReason='';await reload();await showReview();toast(result.message);return;}
+    if(type.startsWith('expense-')){const request=expenseRequest(type,id,b);if(!request)throw new Error('费用操作无效');const result=await api(request.path,{method:request.method,body:request.body,key:form.dataset.key});await reload();await showExpenses(request.contractId);toast(result.message||'合同费用已保存');return;}
     if(type==='ai-intake') {
       const page=getP();setIntakeBusy(form,true);
       const files=[...form.querySelector('[name=files]').files];
@@ -549,31 +692,45 @@ document.addEventListener("submit", async (e) => {
         ),
       );
     }
-    if(['contract-maintain','contract-project'].includes(type)){
+    if(['contract-maintain','contract-project','contract-meta','contract-items'].includes(type)){
       path='/contracts/'+id;method='PATCH';
       if(form.querySelector('.maintenance-items')){path='/contracts/'+id+'/maintenance';body=maintenancePayload(form);}else{const prior=S.contracts.find(c=>c.id===id);for(const key of Object.keys(body))if(key!=='reason'&&String(body[key]??'')===String(prior?.[key]??''))delete body[key];}
-      returnTo={type:type==='contract-project'?'collection':'contract',id};
+      returnTo=formReturn||{type:type==='contract-project'?'collection':'contract',id,tab:'overview'};
     }
     if(type==='contract-delete'){path='/contracts/'+id;method='DELETE';body.confirmed=body.confirmed==='on';returnTo=null;}
     if(type==='payment-maintain'){path='/payments/'+id+'/details';method='PATCH';const parent=S.contracts.find(c=>c.payments.some(p=>p.id===id));returnTo={type:current==='collections'?'collection':'contract',id:parent.id};}
+    if(type==='payment-maintain'){
+      const prior=S.contracts.flatMap(c=>c.payments).find(p=>p.id===id);
+      body.duplicate_confirmed=b.duplicate_confirmed==='on';
+      if(prior.status==='已到账'){body.promise_date=prior.promise_date||undefined;body.checkpoint_date=prior.checkpoint_date||undefined;}
+    }
       if(type==='item-margin'){
         path='/items/'+id;method='PATCH';
         const prior=S.contracts.flatMap(c=>c.items).find(i=>i.id===id);
         if(body.margin===''||prior?.margin!=null&&Number(body.margin)===prior.margin/100)delete body.margin;
         for(const key of ['name','kind','payment_date','valid_until'])if(String(body[key]??'')===String(prior?.[key]??''))delete body[key];
-      if(body.margin_percent!=='')body.margin_rate=Number(body.margin_percent)/100;
+      if(body.margin_percent!==undefined&&body.margin_percent!=='')body.margin_rate=Number(body.margin_percent)/100;
       delete body.margin_percent;
       const parent=S.contracts.find(c=>c.items.some(i=>i.id===id));returnTo={type:'contract',id:parent.id};
     }
-    if(type==='collection-receive'){path='/payments/'+id+'/receive';const parent=S.contracts.find(c=>c.payments.some(p=>p.id===id));returnTo={type:'contract',id:parent.id};}
+    if(type==='collection-receive'){path='/payments/'+id+'/receive';body.duplicate_confirmed=b.duplicate_confirmed==='on';}
     if(type==='payment-plan'){path='/payments/'+id;method='PATCH';}
     if(type==='contract-extract'){path='/contracts/'+id+'/extract-attachment';body={attachment_id:Number(body.attachment_id)};returnTo={type:'contract',id};}
     if((type==='contract'||type==='convert')&&body.items)body.items=body.items.map(item=>{const value={...item};if(value.margin_percent!==undefined&&value.margin_percent!=='')value.margin_rate=Number(value.margin_percent)/100;delete value.margin_percent;return value;});
     if (type === "payment") {
       path = "/payments";
       body.contract_id = b.contract_id||id;
+      body.status='已到账';body.duplicate_confirmed=b.duplicate_confirmed==='on';
     }
-    if(type==='archive-contract'){path='/contracts/'+id+'/archive';body.both_stamped=b.both_stamped==='on';body.archive_attachment_id=Number(b.archive_attachment_id);}
+    if(type==='payment-plan-create'){path='/payments';body.contract_id=b.contract_id||id;body.status='待到账';}
+    if(type==='payment-void'){path='/payments/'+id+'/void-plan';body.confirmed=b.confirmed==='on';}
+    if(type==='payment-reconcile'){path='/payments/'+id+'/reconcile';}
+    if(type==='archive-contract'){
+      path='/contracts/'+id+'/archive';const file=await contractFile(form);
+      body={both_stamped:b.both_stamped==='on',...(b.archive_attachment_id?{archive_attachment_id:Number(b.archive_attachment_id)}:{}),...(file?{file}:{})};
+    }
+    if(type==='contract-upload'){path='/contracts/'+id+'/attachments';const file=await contractFile(form);if(!file)throw new Error('请选择要上传的合同附件');body={file};returnTo={...(formReturn||{type:'contract',id}),tab:'attachments',scrollTop:0};}
+    if(type==='contract-terminate'){path='/contracts/'+id+(canManageContractData(S)?'/termination':'/termination-request');body={reason:b.reason,...(canManageContractData(S)?{decision:b.decision||'approved',confirmed:b.confirmed==='on'}:{})};returnTo={...(formReturn||{type:'contract',id}),tab:'overview',scrollTop:0};}
     if (type === "receive-payment") path = "/payments/" + id + "/receive";
     if (type === "edit-contract") {
       path = "/contracts/" + id;
@@ -603,8 +760,6 @@ document.addEventListener("submit", async (e) => {
       }
     }
     if(type==='customer-level'){path='/customers/'+id;method='PATCH';}
-    if(type==='commission-confirm')path='/commissions/confirm';
-    if(type==='commission-pay')path='/commissions/'+id+'/pay';
     if(type==='performance-review') {path='/performance/review';body.user_id=id;}
     if(type==='performance-rules') {path='/rules';method='PATCH';body={performance:Object.fromEntries(Object.entries(b).filter(([k])=>k.startsWith('performance:')).map(([k,v])=>[k.slice(12),Number(v)]))};}
     if(type==='payment-allocation')path='/payments/'+id+'/allocation';
@@ -620,6 +775,13 @@ document.addEventListener("submit", async (e) => {
       }
     }
     if(type==='sales-commission-policy') {path='/rules';method='PATCH';body={commission:{sales_policy:salesPolicyFromForm(S.rules.commission.sales_policy,b)}};}
+    if(['payment','payment-plan-create','payment-plan','payment-void','payment-reconcile','payment-maintain','payment-allocation','collection-receive'].includes(type)){
+      const parent=body.contract_id?S.contracts.find(c=>c.id===Number(body.contract_id)):S.contracts.find(c=>c.payments.some(p=>p.id===id));
+      if(parent)returnTo={type:formReturn?.type==='contract'?'contract':formReturn?.type==='collection'?'collection':current==='collections'?'collection':'contract',id:parent.id,tab:'payments',scrollTop:formReturn?.tab==='payments'?formReturn.scrollTop||0:0};
+    }
+    if(['contract-maintain','contract-items','contract-meta','contract-delete','payment-maintain','payment-allocation','item-margin'].includes(type)&&canManageContractData(S)){body.data_correction=true;}
+    if(type==='item-margin'){delete body.amount;delete body.margin_percent;}
+    if(type==='admin-record'){path=b.path;method=b.method;body={reason:b.reason,confirmed:b.confirmed==='on'};returnTo=null;}
     const result = await api(path, { method, body, key: form.dataset.key });
     const showSavedDetail=dialog.open&&dialog.contains(form);
     if(showSavedDetail){dialog.close();panel=null;formReturn=null;}
@@ -636,13 +798,15 @@ document.addEventListener("submit", async (e) => {
       returnTo = { type: "contract", id: result.id };
     if(type==='contact')returnTo={type:'customer',id:Number(body.customer_id)};
     if(type==='quote'||type==='activity')returnTo={type:'opportunity',id:Number(body.opportunity_id)};
-    if(type==='payment')returnTo={type:'contract',id:Number(body.contract_id)};
-    if(type==='archive-contract')returnTo={type:'contract',id:Number(id)};
-    if (returnTo&&showSavedDetail&&current===submittedPage.view&&!dialog.open) openPanel(returnTo.type, returnTo.id);
+    if(type==='archive-contract')returnTo={type:'contract',id:Number(id),tab:'payments',scrollTop:0};
+    if(['contracts','collections'].includes(current)&&current===submittedPage.view){window.scrollTo(0,submittedScroll.top);const table=document.querySelector('.workflow-ledger-table');if(table)table.parentElement.scrollLeft=submittedScroll.left;}
+    if (returnTo&&showSavedDetail&&current===submittedPage.view&&!dialog.open) openPanel(returnTo.type, returnTo.id,returnTo);
+    if(type==='admin-record'&&form.querySelector('.recycle-preview-context'))await showRecycle(recycleFilters);
     toast(result.message || "已保存");
   } catch (err) {
+    showCollectionError(form,err);
     error.textContent = err.message;
-    if(error.isConnected)error.scrollIntoView({ block: "nearest" });else toast(err.message,true);
+    if(error.isConnected){error.scrollIntoView({block:'start'});error.focus({preventScroll:true});}else toast(err.message,true);
   } finally {
     if(type==='ai-intake')setIntakeBusy(form,false);
     form.removeAttribute('aria-busy');
@@ -689,6 +853,9 @@ document.addEventListener("change", async (e) => {
   if(e.target.matches('form[data-form="payment"] [name="contract_id"]'))syncPaymentContext(e.target.form);
   if(e.target.matches('form[data-form="target"] [name="user_id"],form[data-form="target"] [name="quarter"]'))syncTargetForm(e.target.form,S);
   if(e.target.id==='target-quarter'){getP().targetQuarter=e.target.value;content();return;}
+  if(['commission-status','commission-history-period'].includes(e.target.id)){
+    getP()[e.target.id==='commission-status'?'commissionStatus':'commissionHistoryPeriod']=e.target.value;content();return;
+  }
   const map = {
     "filter-owner": "owner",
     "filter-stage": "stage",
@@ -700,7 +867,8 @@ document.addEventListener("change", async (e) => {
     content();
   }
   if(e.target.id==='commission-period-mode') {
-    const date=S.today,year=date.slice(0,4);
+    const selected=S.commission.period||S.today.slice(0,7),quarter=selected.match(/^(\d{4})Q([1-4])$/);
+    const date=/^\d{4}-\d{2}$/.test(selected)?selected+'-01':quarter?`${quarter[1]}-${String((Number(quarter[2])-1)*3+1).padStart(2,'0')}-01`:selected.slice(0,4)+'-01-01',year=date.slice(0,4);
     commissionPeriod=e.target.value==='month'?date.slice(0,7):S.commission.legacy_mode==='year'?year:`${year}Q${Math.ceil(Number(date.slice(5,7))/3)}`;
     try {await reload();}catch(error){toast(error.message,true);}return;
   }
@@ -711,6 +879,17 @@ document.addEventListener("change", async (e) => {
 });
 document.addEventListener("input", (e) => {
   if (!S) return;
+  if(e.target.id==='commission-search'){
+    clearTimeout(searchTimer);
+    if(e.isComposing)return;
+    const page=getP(),value=e.target.value,position=e.target.selectionStart;
+    searchTimer=setTimeout(()=>{
+      if(current!==page.view)return;
+      page.commissionQ=value;content();
+      const input=document.querySelector('#commission-search');
+      if(input){input.focus();input.setSelectionRange(position,position);}
+    },180);return;
+  }
   if(e.target.matches('form[data-form="performance-rules"] [name="performance:process_weight"],form[data-form="performance-rules"] [name="performance:result_weight"]')){
     const value=Number(e.target.value),other=e.target.name==='performance:process_weight'?'performance:result_weight':'performance:process_weight';
     if(e.target.value!==''&&Number.isFinite(value)&&value>=0&&value<=100)e.target.form.elements.namedItem(other).value=String(Math.round((100-value)*100)/100);
@@ -832,7 +1011,7 @@ window.addEventListener("hashchange", async () => {
   }
 });
 
-function exportList(typeOverride) {
+function exportList(typeOverride,commissionSection='summary') {
   const P = getP();
   const type = typeOverride||P.view;
   let rows;
@@ -870,7 +1049,10 @@ function exportList(typeOverride) {
     ];
   else if(type==='team')rows=[['销售','本月新签(元)','本月回款(元)','漏斗金额(元)','风险商机','近7天跟进','绩效分','等级'],...S.team.filter(u=>!P.owner||u.id===Number(P.owner)).map(u=>[u.name,u.signed/100,u.collected/100,u.pipeline/100,u.riskCount,u.followCount,u.performance?.total??'',u.performance?.grade??''])];
   else if(type==='performance')rows=[['销售','月份','过程原始分','过程折算分','合同结果分','总分','等级','绩效工资系数','状态'],...S.performance.filter(p=>!P.owner||p.user_id===Number(P.owner)).map(p=>[p.name,p.month,p.raw,p.processPoints,p.resultPoints,p.total,p.grade,p.salary_factor,p.status])];
-  else if(type==='commissions')rows=[['销售','周期','类型','计提基数(元)','综合比例','应计提成(元)','已确认(元)','本次差额(元)','产品回款(元)','产品比例','产品提成(元)','服务合同金额(元)','服务提成(元)','核对提示'],...S.commission.previews.filter(p=>!P.owner||p.sales_id===Number(P.owner)).map(p=>[p.name,p.period,p.kind==='personal'?'个人':'团队管理',p.base/100,p.rate,p.total/100,p.confirmed/100,p.due/100,p.components?.[0].base/100||0,p.components?.[0].rate??'',p.components?.[0].total/100||0,p.components?.[1].base/100||0,p.components?.[1].total/100||0,(p.issues||[]).join('；')])];
+  else if(type==='commissions') {
+    const exports=buildCommissionExport(S,P);
+    rows=commissionSection==='detail'?exports.detailRows:commissionSection==='issues'?exports.issueRows:exports.summaryRows;
+  }
   else return;
   const cell = (v) => {
     let value = String(v ?? "");
@@ -884,10 +1066,11 @@ function exportList(typeOverride) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `千帆CRM-${pages[type][0]}-${S.today}.csv`;
+  const exportTitle=type==='commissions'?commissionSection==='detail'?'提成合同明细':commissionSection==='issues'?'提成待完善清单':'实时提成人员汇总':pages[type][0];
+  a.download = `千帆CRM-${exportTitle}-${type==='commissions'?S.commission.period+'-':''}${S.today}.csv`;
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 5000);
-  toast("台账已导出");
+  toast(type==='commissions'?"实时提成已导出":"台账已导出");
 }
 
 try {

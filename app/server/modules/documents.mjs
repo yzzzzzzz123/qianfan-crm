@@ -20,7 +20,7 @@ export function renderDocument(ctx, path, actor) {
   } else {
     record = scoped('contracts', id, actor);
     customer = one(db, 'SELECT * FROM customers WHERE id=?', record.customer_id); owner = record.owner_id;
-    items = all(db, 'SELECT name,kind,amount FROM contract_items WHERE contract_id=? ORDER BY id', id).map(i => `${i.name}（${i.kind}）：人民币 ${money(i.amount)} 元`).join('\n');
+    items = all(db, 'SELECT name,kind,amount FROM contract_items WHERE retired_at IS NULL AND contract_id=? ORDER BY id', id).map(i => `${i.name}（${i.kind}）：人民币 ${money(i.amount)} 元`).join('\n');
   }
   const docs = integrationSettings(db).documents;
   const official = !!(docs.confirmed && docs.issuer && docs[kind]);

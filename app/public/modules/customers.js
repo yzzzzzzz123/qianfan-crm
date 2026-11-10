@@ -27,17 +27,17 @@ export function companyProfileDetails(c,canRefresh=false) {
   const metadata=p.checked_at?`<span class="muted">读取时间：${esc(profileTime(p.checked_at))}</span>`:'';
   const refresh=canRefresh&&p.can_refresh!==false&&status!=='not_configured'
     ?busy?'<button class="btn ghost" disabled aria-disabled="true">手动查询</button>':button('手动查询','refresh-company-profile',c.id,'ghost','refresh'):'';
-  const fields=[['company_name','企业名称'],['credit_code','统一社会信用代码'],['company_description','企业简介'],['company_scale','企业规模'],['employee_scale','人员规模'],['insured_count','参保人数'],['main_business','主营业务'],['main_products','主营产品'],['business_scope','工商经营范围'],['annual_employees','年报从业人数'],['annual_report_year','年报年度'],['industry',d._lookup?.field_sources?.industry==='qwen'?'行业':'企查查行业'],['national_industry','国标行业'],['registered_capital','注册资本'],['registration_status','登记状态'],['established_at','成立时间'],['registered_address','注册地址'],['source_updated_at','来源更新时间']];
+  const fields=[['company_name','企业名称'],['credit_code','统一社会信用代码'],['company_description','企业简介'],['company_scale','企业规模'],['employee_scale','人员规模'],['insured_count','参保人数'],['main_business','主营业务'],['main_products','主营产品'],['business_scope','工商经营范围'],['annual_employees','年报从业人数'],['annual_report_year','年报年度'],['industry',['qwen','deepseek'].includes(d._lookup?.field_sources?.industry)?'行业':'企查查行业'],['national_industry','国标行业'],['registered_capital','注册资本'],['registration_status','登记状态'],['established_at','成立时间'],['registered_address','注册地址'],['source_updated_at','来源更新时间']];
   const fieldValue=value=>value===null||value===undefined||value===''?'源接口未提供':Array.isArray(value)?value.join('；'):String(value);
   const sources=(Array.isArray(d._lookup?.sources)?d._lookup.sources:[]).filter(s=>{try{const u=new URL(s.url);return ['https:','http:'].includes(u.protocol)&&!u.username&&!u.password;}catch{return false;}}).slice(0,8);
   const references=sources.length?`<p class="company-profile-meta">查询依据：${sources.map(s=>`<a href="${esc(s.url)}" target="_blank" rel="noopener noreferrer">${esc(s.title||'公开资料')}</a>`).join(' · ')}</p>`:'';
   const hasFacts=fields.some(([key])=>d[key]!==null&&d[key]!==undefined&&d[key]!=='');
-  return `<section class="detail-section company-profile" aria-busy="${busy}">${sectionHead('详细信息','',refresh)}${metadata?`<p class="company-profile-meta">${metadata}</p>`:''}${hasFacts?`<dl class="detail-facts">${fields.map(([key,label])=>`<div${['business_scope','company_description','main_products'].includes(key)?' class="wide"':''}><dt>${label}</dt><dd>${esc(fieldValue(d[key]))}${d._lookup?.field_sources?.[key]==='qwen'?'<small class="muted"> · Qwen 整理，待核验</small>':''}</dd></div>`).join('')}</dl>`:''}${references}${hasFacts?'<p class="muted">工商经营范围不等于实际主营业务，参保人数不等于全部员工人数。</p>':''}</section>`;
+  return `<section class="detail-section company-profile" aria-busy="${busy}">${sectionHead('详细信息','',refresh)}${metadata?`<p class="company-profile-meta">${metadata}</p>`:''}${hasFacts?`<dl class="detail-facts">${fields.map(([key,label])=>`<div${['business_scope','company_description','main_products'].includes(key)?' class="wide"':''}><dt>${label}</dt><dd>${esc(fieldValue(d[key]))}${['qwen','deepseek'].includes(d._lookup?.field_sources?.[key])?'<small class="muted"> · AI 整理，待核验</small>':''}</dd></div>`).join('')}</dl>`:''}${references}${hasFacts?'<p class="muted">工商经营范围不等于实际主营业务，参保人数不等于全部员工人数。</p>':''}</section>`;
 }
 
 export function companyProfileFeedback(p={}){
   if(['pending','queued','running'].includes(p.job?.status))return {pending:true,message:'正在查询企业资料，完成后会自动更新',error:false};
-  if(p.details?._lookup?.kind==='qwen')return {pending:false,message:p.reason||'已转 Qwen 查询，结果已更新',error:!Object.keys(p.details).some(k=>k!=='_lookup'&&p.details[k]!==null&&p.details[k]!=='')};
+  if(['qwen','deepseek'].includes(p.details?._lookup?.kind))return {pending:false,message:p.reason||'已转 AI 查询，结果已更新',error:!Object.keys(p.details).some(k=>k!=='_lookup'&&p.details[k]!==null&&p.details[k]!=='')};
   if(p.state==='ready')return {pending:false,message:'企业资料已更新',error:false};
   return {pending:false,message:p.reason||'本次未取得企业资料，请稍后重试',error:true};
 }

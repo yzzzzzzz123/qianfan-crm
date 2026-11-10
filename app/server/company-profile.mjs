@@ -72,14 +72,14 @@ export function createCompanyProfiles({db,scoped,audit,provider=createCompanyPro
     assert(result&&['ready','partial','not_found','mismatch','failed','not_configured'].includes(result.state),'企业信息读取状态无效',502);
     const previous=read(current);
     let value={...defaults(),...result,checked_at:now()};
-    if(value.details?._lookup?.kind==='qwen'&&previous.state!=='stale'){
+    if(['qwen','deepseek'].includes(value.details?._lookup?.kind)&&previous.state!=='stale'){
       // A fallback may supplement, but never replace, previously verified QCC facts.
       const details={...value.details},meta={...details._lookup,field_sources:{...details._lookup.field_sources}};
       for(const [key,item] of Object.entries(previous.details))if(key!=='_lookup'&&item!==null&&item!==''&&meta.field_sources[key]!=='qcc'&&(!previous.details._lookup||previous.details._lookup.field_sources?.[key]==='qcc')){
         details[key]=item;meta.field_sources[key]='qcc';
       }
       if(Object.values(meta.field_sources).includes('qcc')){
-        value.provider='企查查 MCP + Qwen 联网整理（补充资料待核验）';
+        value.provider='企查查 MCP + AI 联网整理（补充资料待核验）';
         meta.qcc_checked_at=meta.qcc_checked_at||previous.details._lookup?.qcc_checked_at||previous.checked_at;
       }
       value={...value,details:{...details,_lookup:meta}};

@@ -69,22 +69,14 @@ test('从个人或经营看板查看全部待办保留销售、客户等级、�
   assert.equal(followupFilters(S,{view:'personal'}).owner,'1');
 });
 
-test('管理员从提成批次行登记发放，保留既有HTTP权限、幂等及已发放状态',async t=>{
-  const f=await fixture(t),admin=await f.login(1),sales=await f.login(2);
-  const id=Number(run(f.db,"INSERT INTO commission_batches(sales_id,kind,period,base,rate,amount,status,snapshot,created_at,confirmed_by) VALUES(2,'personal','2026Q4',10000,0.1,1000,'confirmed','{}',?,1)",now()).lastInsertRowid);
-  let S=(await f.request('/state',{actor:admin})).body;
-  const html=commissions(S,{}),form=formContent(S,'commission-pay',id);
-  assert.match(html,new RegExp(`data-action="commission-pay" data-id="${id}"`));
-  assert.match(form,/data-form="commission-pay"/);assert.match(form,/2026Q4/);assert.match(form,/已确认金额 ¥10/);
-  assert.match(form,/name="paid_at"/);assert.match(form,/不会自动执行转账/);
-  assert.equal((await f.request(`/commissions/${id}/pay`,{actor:sales,method:'POST',body:{paid_at:today()}})).status,403);
-  const request={actor:admin,method:'POST',body:{paid_at:today(),note:'隔离测试登记'},key:crypto.randomUUID()};
-  assert.equal((await f.request(`/commissions/${id}/pay`,request)).status,200);
-  assert.equal((await f.request(`/commissions/${id}/pay`,request)).status,200);
-  assert.equal(one(f.db,'SELECT status FROM commission_batches WHERE id=?',id).status,'paid');
-  S=(await f.request('/state',{actor:admin})).body;
-  assert.doesNotMatch(commissions(S,{}),new RegExp(`data-action="commission-pay" data-id="${id}"`));
-  assert.match(formContent(S,'commission-pay',id),/已登记发放/);
-  const own=(await f.request('/state',{actor:sales})).body;
-  assert.doesNotMatch(formContent(own,'commission-pay',id),/data-form="commission-pay"/);
+test('提成历史批次只读，旧表单和发放HTTP入口均不能写入',async t=>{
+ const f=await fixture(t),admin=await f.login(1),sales=await f.login(2);
+ const id=Number(run(f.db,"INSERT INTO commission_batches(sales_id,kind,period,base,rate,amount,status,snapshot,created_at,confirmed_by) VALUES(2,'personal','2026Q4',10000,0.1,1000,'confirmed','{}',?,1)",now()).lastInsertRowid);
+ const original=one(f.db,'SELECT * FROM commission_batches WHERE id=?',id);
+ const S=(await f.request('/state?commissionPeriod=2026Q4',{actor:admin})).body;
+ assert.doesNotMatch(commissions(S,{}),/data-action="commission-pay"/);
+ assert.doesNotMatch(formContent(S,'commission-pay',id),/data-form="commission-pay"/);
+ assert.equal((await f.request(`/commissions/${id}/pay`,{actor:sales,method:'POST',body:{paid_at:today()}})).status,403);
+ assert.equal((await f.request(`/commissions/${id}/pay`,{actor:admin,method:'POST',body:{paid_at:today()}})).status,410);
+ assert.deepEqual(one(f.db,'SELECT * FROM commission_batches WHERE id=?',id),original);
 });

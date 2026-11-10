@@ -11,11 +11,12 @@ export function setSimulationIdentity(id) {
 export function setCsrf(value) {
   csrf = value || "";
 }
-export async function api(path, { method = "GET", body, key } = {}) {
+export async function api(path, { method = "GET", body, key, keepalive = false } = {}) {
   const simulated=!path.startsWith('/auth/')&&!path.startsWith('/developer/')?simulationIdentity():'';
   const response = await fetch(basePath+"api" + path, {
     method,
     credentials: "same-origin",
+    keepalive,
     headers: {
       ...(simulated?{'X-CRM-Act-As':simulated}:{}),
       ...(method !== "GET"

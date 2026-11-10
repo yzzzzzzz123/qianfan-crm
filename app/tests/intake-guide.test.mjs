@@ -7,7 +7,7 @@ import {renderPage} from '../public/views.js';
 test('资料指南逐业务表覆盖允许类型，字段映射真实列并区分新增与修改',async t=>{
   const groups=visibleGuideGroups('admin'),types=groups.flatMap(g=>g.types);
   assert.deepEqual([...types].sort(),Object.keys(intakeSchema).filter(type=>type!=='member').sort());assert.equal(new Set(types).size,types.length);
-  assert.equal(groups.length,12);assert.equal(groups.find(g=>g.id==='payments').types.length,4);
+  assert.equal(groups.length,11);assert.equal(groups.find(g=>g.id==='payments').types.length,4);
   assert.ok(!groups.some(g=>g.id==='members'));
   assert.deepEqual(groups.find(g=>g.id==='contacts').types,['contact']);
   assert.deepEqual(groups.find(g=>g.id==='quotes').types,['quote']);

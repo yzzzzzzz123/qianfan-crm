@@ -1,95 +1,91 @@
 import {createHash} from 'node:crypto';
-import {all,one} from '../database.mjs';
-import {today} from '../domain.mjs';
-import {allocate,bandFor,contractSplit} from '../sales-policy.mjs';
-import {commissionInputs} from './commission-inputs.mjs';
+import {all} from '../database.mjs';
+import {allocate,bandFor} from '../sales-policy.mjs';
+import {receiptMarginLedger,RECEIPT_MARGIN_SCHEME,roundRate,isServiceItem} from './receipt-margins.mjs';
 
-export function salesCommissionPreviews(db,rules,actor,month,performanceFor) {
-  const policy=rules.commission.sales_policy;
-  const users=all(db,"SELECT * FROM users WHERE role='sales' AND active=1 AND business_member=1 AND developer_admin=0");
-  const contracts=all(db,"SELECT * FROM contracts WHERE retired_at IS NULL AND lifecycle!='草稿' AND sign_date<=? ORDER BY id",today());
-  const items=all(db,'SELECT * FROM contract_items ORDER BY id');
-  const receipts=all(db,"SELECT * FROM payments WHERE status='已到账' ORDER BY pay_date,id");
-  const inputs=commissionInputs(db,month);
-  const batches=all(db,"SELECT * FROM commission_batches WHERE kind='personal' AND period=?",month);
-  const lockedLines=all(db,"SELECT l.*,b.sales_id FROM commission_lines l JOIN commission_batches b ON b.id=l.batch_id WHERE b.kind='personal' AND b.period=?",month);
-  const legacySettled=new Set(all(db,"SELECT DISTINCT contract_id FROM commission_lines l JOIN commission_batches b ON b.id=l.batch_id WHERE b.kind='personal' AND l.component='legacy'").map(l=>l.contract_id));
-  return users.filter(u=>actor.role==='admin'||actor.role==='sales'&&actor.id===u.id).map(user=>{
-    const performance=performanceFor(db,rules,user,month),grade=performance.grade;
-    const issues=[],productBases=[],serviceBases=[],evidence=[];
-    const owned=contracts.filter(c=>c.owner_id===user.id);
-    for(const contract of owned) {
-      const split=inputs.split(contract);
-      const claims=inputs.claims.filter(p=>p.contract_id===contract.id);
-      const paid=[...receipts.filter(p=>p.contract_id===contract.id&&p.pay_date?.startsWith(month)&&p.pay_date<=today()),...claims.map(p=>({...p,id:null,pay_date:p.date,product_amount:p.product_amount,source_claim:true}))];
-      for(const claim of claims)issues.push(`${contract.name}：${claim.reason}`);
-      if(split.source_basis&&(contract.sign_date.startsWith(month)||paid.length))issues.push(`${contract.name}：合同拆分取自已核验来源字段，明细尚待补齐，仅供试算`);
-      if(legacySettled.has(contract.id)&&(contract.sign_date.startsWith(month)||paid.length)) {issues.push(`${contract.name}：已有历史个人提成，请核对后再切换新算法，避免重复计提`);continue;}
-      if(!split.valid) {
-        if(contract.sign_date.startsWith(month)||paid.length)issues.push(`${contract.name}：${split.reason}`);
-        continue;
-      }
-      const decorate=i=>({...i,contract_name:contract.name,owner_id:user.id});
-      if(contract.sign_date.startsWith(month))serviceBases.push(...split.items.filter(i=>i.kind!=='标品').map(i=>({...decorate(i),base:i.amount,component:'service',contract_service:split.service})));
-      let productReceived=0;
-      for(const payment of paid) {
-        let product=payment.product_amount;
-        if(product==null) {
-          if(split.product===0)product=0;
-          else if(split.service===0)product=payment.amount;
-          else {issues.push(`${contract.name}：到账 ${payment.pay_date} 的产品回款分配未填写`);continue;}
-        }
-        const prior=receipts.filter(p=>p.contract_id===contract.id&&p.pay_date&&p.pay_date<=today());
-        // Across all dated receipts an explicit split must not exceed either contract component.
-        const known=prior.filter(p=>p.product_amount!=null);
-        if(known.reduce((s,p)=>s+p.product_amount,0)>split.product||known.reduce((s,p)=>s+p.amount-p.product_amount,0)>split.service) {
-          issues.push(`${contract.name}：累计产品或服务回款超过合同对应金额`);continue;
-        }
-        productReceived+=product;
-        evidence.push({payment_id:payment.id,contract_id:contract.id,contract_name:contract.name,date:payment.pay_date,amount:payment.amount,product_amount:product,...(payment.source_claim?{source_claim:true,source_record_id:payment.source_record_id}:{})});
-      }
-      if(productReceived>0)productBases.push(...allocate(productReceived,split.items.filter(i=>i.kind==='标品')).map(i=>({...decorate(i),base:i.base,component:'product'})));
-      if(receipts.some(p=>p.contract_id===contract.id&&!p.pay_date&&p.created_at.startsWith(month)))issues.push(`${contract.name}：已到账记录缺少到账日期`);
+const sum=(rows,key)=>rows.reduce((s,r)=>s+(r[key]??0),0);
+const schemeOf=batch=>{try{return JSON.parse(batch.snapshot).scheme;}catch{return null;}};
+export function salesCommissionPreviews(db,rules,actor,month,performanceFor,manager){
+  const policy=rules.commission.sales_policy,teamPolicy=rules.commission;
+  const users=all(db,"SELECT * FROM users WHERE active=1 AND business_member=1 AND developer_admin=0 AND (role='sales' OR id=?) ORDER BY id",manager||0);
+  const ledger=receiptMarginLedger(db,month),eligible=new Set(users.map(u=>u.id));
+  const batches=all(db,'SELECT * FROM commission_batches ORDER BY id');
+  const lockedLines=all(db,'SELECT l.*,b.sales_id,b.kind,b.period,b.snapshot FROM commission_lines l JOIN commission_batches b ON b.id=l.batch_id');
+  const result=[];
+  for(const user of users)for(const kind of user.id===manager?['personal','management']:['personal']){
+    if(actor.role!=='admin'&&(actor.role!=='sales'||actor.id!==user.id))continue;
+    const management=kind==='management',fixedGrade=!management&&user.id===manager;
+    const performance=management?null:fixedGrade?{grade:'A',status:'fixed',review_id:null}:performanceFor(db,rules,user,month);
+    const grade=performance?.grade??null,issues=[];
+    const belongs=id=>management?eligible.has(id)&&id!==manager:id===user.id;
+    const receipts=ledger.rows.filter(r=>belongs(r.sales_id));
+    const claims=ledger.claims.filter(r=>belongs(r.sales_id));
+    const evidence=receipts.map(({items,...row})=>row);
+    const bases=[],cash=sum(receipts.filter(r=>r.date),'amount');
+    for(const claim of claims)issues.push(`${claim.contract_name}：${claim.reason}`);
+    for(const r of receipts){
+      const prefix=`${r.contract_name} · 到账 ${r.date||'日期缺失'}：`;
+      // Service margin is needed for management, while personal service uses cash.
+      const relevant=r.issues.filter(v=>management||!v.startsWith('服务毛利或服务金额缺失'));
+      issues.push(...relevant.map(v=>prefix+v));
+      if(r.source_basis)issues.push(prefix+'合同明细尚待补齐，来源字段仅供核对，不可确认结算');
+      if(!r.allocation_valid)continue;
+      const append=(component,base,rows)=>{
+        if(base===null||base<=0)return;
+        for(const item of allocate(base,rows))bases.push({...item,item_id:item.id,base:item.base,component,owner_id:r.sales_id,contract_name:r.contract_name});
+      };
+      append('product',r.product_gross_margin,r.items.filter(i=>i.kind==='标品'));
+      if(r.service_classification_confirmed)append('service',management?r.service_gross_margin:r.service_received,r.items.filter(isServiceItem));
     }
-    const productBase=productBases.reduce((s,i)=>s+i.base,0),serviceBase=serviceBases.reduce((s,i)=>s+i.base,0);
-    if(serviceBase>0&&!policy.service_scope_confirmed)issues.push('项目服务按单合同还是当月合计选档尚待确认，当前按单合同口径试算');
-    if(productBase+serviceBase>0) {
+    // Aggregate a component/item before subtracting previous confirmations once.
+    const groups=new Map();
+    for(const row of bases){const key=`${row.component}:${row.item_id}:${row.contract_id}`;const prior=groups.get(key);if(prior)prior.base+=row.base;else groups.set(key,{...row});}
+    const productBase=sum(bases.filter(l=>l.component==='product'),'base'),serviceBase=sum(bases.filter(l=>l.component==='service'),'base');
+    if(serviceBase>0&&(!policy.service_scope_confirmed||policy.service_aggregation!=='month'))issues.push('开发运维须确认按当月实际服务回款合计选档，当前规则范围尚未对齐');
+    if(!management&&!fixedGrade&&cash>0){
       if(!grade)issues.push('当月绩效等级尚未确定');
       if(performance.status!=='confirmed')issues.push('当月绩效尚未确认锁定，当前仅供试算');
     }
-    const productBand=bandFor(policy.product,productBase),productRate=productBase===0?0:productBand.rates[grade]??null;
-    if(productBase>0&&grade&&productRate===null)issues.push(`产品回款 ${productBand.min/10000/100} 万元起档的 ${grade} 级比例待核实`);
-    const serviceGroups=new Map();
-    for(const line of serviceBases) {
-      const key=policy.service_aggregation==='month'?'month':line.contract_id;
-      if(!serviceGroups.has(key))serviceGroups.set(key,[]);
-      serviceGroups.get(key).push(line);
-    }
-    let productTotal=0,serviceTotal=0;
+    const productBand=bandFor(policy.product,productBase),serviceBand=bandFor(policy.service,serviceBase);
+    const teamRate=productBase+serviceBase>teamPolicy.threshold?teamPolicy.high_rate:teamPolicy.low_rate;
+    const productRate=management?teamRate:productBase===0?0:productBand.rates[grade]??null;
+    const serviceRate=management?teamRate:serviceBase===0?0:serviceBand.rates[grade]??null;
+    if(productBase>0&&grade&&productRate===null)issues.push(`产品回款毛利 ${productBand.min/1000000} 万元起档的 ${grade} 级比例待核实`);
+    if(serviceBase>0&&grade&&serviceRate===null)issues.push(`开发运维 ${serviceBand.min/1000000} 万元起档的 ${grade} 级比例待核实`);
+    const locked=batches.filter(b=>b.sales_id===user.id&&b.kind===kind&&b.period===month),confirmed=sum(locked,'amount');
+    if(locked.some(b=>schemeOf(b)!==RECEIPT_MARGIN_SCHEME))issues.push('同月已有其他算法的结算，须先核对历史快照');
+    const contractIds=new Set(receipts.map(r=>r.contract_id));
+    if(lockedLines.some(l=>l.kind===kind&&l.sales_id===user.id&&contractIds.has(l.contract_id)&&schemeOf(l)!==RECEIPT_MARGIN_SCHEME))issues.push('到账合同已有其他算法的历史结算，须核对避免重复计提');
     const lines=[];
-    function price(rows,rate,component) {
-      let base=0,allocated=0;
-      for(const i of rows) {
-        base+=i.base;const entitlement=rate===null?0:Math.round(base*rate)-allocated;allocated+=entitlement;
-        const prior=lockedLines.filter(l=>l.sales_id===user.id&&l.component===component&&l.item_id===i.id).reduce((s,l)=>s+l.amount,0);
-        lines.push({item_id:i.id,contract_id:i.contract_id,contract_name:i.contract_name,owner_id:user.id,kind:i.kind,product:i.name,component,base:i.base,rebate_rate:i.rate,rate,entitlement,amount:entitlement-prior});
+    for(const component of ['product','service']){
+      const rate=component==='product'?productRate:serviceRate;let cumulative=0,allocated=0;
+      for(const row of [...groups.values()].filter(r=>r.component===component)){
+        cumulative+=row.base;const entitlement=rate===null?0:roundRate(cumulative,rate)-allocated;allocated+=entitlement;
+        const prior=sum(lockedLines.filter(l=>l.sales_id===user.id&&l.kind===kind&&l.period===month&&l.component===component&&l.item_id===row.item_id),'amount');
+        if(row.item_id==null)issues.push(`${row.contract_name}：缺少可锁定的合同明细`);
+        lines.push({item_id:row.item_id,contract_id:row.contract_id,contract_name:row.contract_name,owner_id:row.owner_id,kind:row.kind,product:row.name,component,base:row.base,rebate_rate:row.rate??0,rate,entitlement,amount:entitlement-prior,
+          basis:component==='product'||management?'receipt_gross_margin':'service_receipts'});
       }
-      return allocated;
     }
-    productTotal=price(productBases,productRate,'product');
-    for(const group of serviceGroups.values()) {
-      const base=group.reduce((s,i)=>s+i.base,0),rate=bandFor(policy.service,base).rates[grade]??null;
-      if(grade&&rate===null)issues.push(`项目服务 ${bandFor(policy.service,base).min/10000/100} 万元起档的 ${grade} 级比例待核实`);
-      serviceTotal+=price(group,rate,'service');
+    // Each snapshot carries each receipt's commission and exact contract rate.
+    for(const component of ['product','service']){
+      const rate=component==='product'?productRate:serviceRate;let cumulative=0,allocated=0;
+      for(const row of evidence){const base=component==='product'?row.product_gross_margin:management?row.service_gross_margin:row.service_classification_confirmed?row.service_received:null;
+        if(!row.allocation_valid||base===null||rate===null){row[component+'_commission']=null;continue;}
+        cumulative+=base;const next=roundRate(cumulative,rate);row[component+'_commission']=next-allocated;allocated=next;
+      }
     }
-    const locked=batches.filter(b=>b.sales_id===user.id),confirmed=locked.reduce((s,b)=>s+b.amount,0);
-    if(locked.some(b=>JSON.parse(b.snapshot).scheme!==policy.version))issues.push('同月已有其他算法的结算，须先核对历史快照');
-    const total=productTotal+serviceTotal,due=total-confirmed;
+    const productTotal=productRate===null?0:roundRate(productBase,productRate),serviceTotal=serviceRate===null?0:roundRate(serviceBase,serviceRate),total=productTotal+serviceTotal,due=total-confirmed;
     if(due<0||lines.some(l=>l.amount<0))issues.push('当前应计低于已确认金额，请核对差额');
-    const components=[{type:'product',label:'产品',basis:evidence.some(p=>p.source_claim)?'当月产品回款（含待核对合同记录）':'当月产品实际回款',base:productBase,rate:productRate,total:productTotal},
-      {type:'service',label:'项目／服务',basis:policy.service_aggregation==='contract'?'每份合同的项目／服务金额选档':'当月项目／服务合同金额合计选档',base:serviceBase,rate:serviceGroups.size===1?lines.find(l=>l.component==='service')?.rate??0:null,total:serviceTotal}];
-    const input={sales_id:user.id,kind:'personal',period:month,scheme:policy.version,policy,grade,performance_status:performance.status,review_id:performance.review_id,components,lines,evidence,confirmed,issues:[...new Set(issues)]};
-    const scenarios=['D','C','B','A'].map(g=>{const pr=productBase?productBand.rates[g]:0;const services=[...serviceGroups.values()].map(group=>{const base=group.reduce((s,i)=>s+i.base,0),rate=bandFor(policy.service,base).rates[g];return rate==null?null:Math.round(base*rate);});return {grade:g,product:pr==null?null:Math.round(productBase*pr),service:services.some(v=>v==null)?null:services.reduce((s,v)=>s+v,0)};});
-    return {...input,name:user.name,base:productBase+serviceBase,rate:productBase+serviceBase?total/(productBase+serviceBase):0,total,confirmed,paid:locked.filter(b=>b.status==='paid').reduce((s,b)=>s+b.amount,0),due,blocked:issues.length>0,scenarios,amount_pending:productBase+serviceBase>0&&(!grade||lines.some(l=>l.rate==null)),fingerprint:createHash('sha256').update(JSON.stringify(input)).digest('hex')};
-  });
+    const components=[{type:'product',label:'产品回款毛利',basis:management?'其他销售当月产品实际到账 × 各合同有效产品毛利率':'当月产品实际到账 × 各合同有效产品毛利率，按毛利合计选档',received_amount:sum(receipts,'product_amount'),gross_margin:sum(receipts,'product_gross_margin'),base:productBase,rate:productRate,total:productTotal},
+      {type:'service',label:management?'开发运维回款毛利':'开发运维回款',basis:management?'其他销售当月服务实际到账 × 合同服务毛利率':'当月定开、运维实际服务回款合计选档并计提',received_amount:sum(receipts,'service_received'),gross_margin:sum(receipts,'service_gross_margin'),base:serviceBase,rate:serviceRate,total:serviceTotal}];
+    const rates=[...new Set(receipts.filter(r=>r.product_amount>0).map(r=>r.product_margin_rate))];
+    const amountPending=claims.length>0||receipts.some(r=>!r.allocation_valid||r.product_gross_margin===null||r.service_received>0&&(!r.service_classification_confirmed||management&&r.service_gross_margin===null))||productRate===null||serviceRate===null;
+    const input={sales_id:user.id,kind,period:month,scheme:RECEIPT_MARGIN_SCHEME,policy_version:policy.version,policy,team_policy:management?{threshold:teamPolicy.threshold,low_rate:teamPolicy.low_rate,high_rate:teamPolicy.high_rate}:null,grade,grade_source:fixedGrade?'fixed_A':management?'not_applicable':'performance',performance_status:performance?.status??null,review_id:performance?.review_id??null,components,lines,evidence,source_claims:claims,confirmed,issues:[...new Set(issues)]};
+    const scenarios=management||fixedGrade?null:['D','C','B','A'].map(g=>({grade:g,product:productBase===0?0:productBand.rates[g]==null?null:roundRate(productBase,productBand.rates[g]),service:serviceBase===0?0:serviceBand.rates[g]==null?null:roundRate(serviceBase,serviceBand.rates[g])}));
+    result.push({...input,name:user.name,base:productBase+serviceBase,base_is_composite:!management,rate:management?teamRate:0,received_amount:cash,product_margin_rate:rates.length===1?rates[0]:null,product_margin_rates_multiple:rates.length>1,total,paid:sum(locked.filter(b=>b.status==='paid'),'amount'),due,blocked:issues.length>0,scenarios,amount_pending:amountPending,fingerprint:createHash('sha256').update(JSON.stringify(input)).digest('hex')});
+  }
+  return result;
 }
+
+export {realtimeSalesCommissionPreviews} from './realtime-sales-commissions.mjs';

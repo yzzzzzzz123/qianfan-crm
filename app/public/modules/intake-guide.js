@@ -23,7 +23,7 @@ export const intakeGuideGroups=Object.freeze([
     {scope:'绩效规则',label:'绩效评定',view:'performance'},
   ]},
 ]);
-const names={product_amount:{payment:'本笔产品回款金额（元）',payment_receive:'本笔产品回款金额（元）',payment_allocation:'本笔产品回款金额（元）'},name:{customer:'客户全称',contact:'联系人姓名',opportunity:'售卖产品',contract:'合同名称',contract_item:'产品/服务名称',member:'成员姓名'},kind:{contract_item:'产品/服务类型'},collaborator_pm:{contract:'项目经理',opportunity:'协作项目经理'},role:{contact:'联系人角色',member:'成员角色'},owner_id:{opportunity:'销售姓名',contract:'销售小二'},amount:{opportunity:'合同总额（元）',payment:'本笔回款或计划金额（元）'},status:{payment:'本笔款项状态'},valid_until:{contract:'产品到期日',contract_item:'产品到期日'}};
+const names={source_file:{contract_archive:'签章附件（选填）',contract_attachment:'合同附件'},both_stamped:{contract_archive:'确认已签署'},product_amount:{payment:'本笔产品回款金额（元）',payment_receive:'本笔产品回款金额（元）',payment_allocation:'本笔产品回款金额（元）'},name:{customer:'客户全称',contact:'联系人姓名',opportunity:'售卖产品',contract:'合同名称',contract_item:'产品/服务名称',member:'成员姓名'},kind:{contract_item:'产品/服务类型'},collaborator_pm:{contract:'项目经理',opportunity:'协作项目经理'},role:{contact:'联系人角色',member:'成员角色'},owner_id:{opportunity:'销售姓名',contract:'销售小二'},amount:{opportunity:'合同总额（元）',payment:'本笔回款或计划金额（元）'},status:{payment:'本笔款项状态'},valid_until:{contract:'产品到期日',contract_item:'产品到期日'}};
 export function intakeFieldLabel(type,key) {
   return names[key]?.[type]||({customer_id:'客户全称或编号',opportunity_id:'商机编号或售卖产品',contract_id:'合同名称或编号',owner_id:'负责人姓名',user_id:'销售姓名',sales_id:'销售姓名',items:intakeSchema[type]?.itemsSchema?.label||'明细',source_file:'原始附件'}[key])||fieldNames[key]||key;
 }

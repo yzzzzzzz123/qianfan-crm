@@ -9,14 +9,14 @@ test('真实库字段审计区分物理表、AI字段和系统列，读取不修
   const db=openDatabase(':memory:');
   try {
     const before=db.prepare('SELECT total_changes() n').get().n,report=auditIntakeStorage(db);
-    assert.equal(report.ok,true,JSON.stringify(report.problems));assert.equal(report.table_count,37);
+    assert.equal(report.ok,true,JSON.stringify(report.problems));assert.equal(report.table_count,41);
     for(const name of ['customer_profiles','contract_attachment_analyses','company_profile_jobs','company_profile_queue_control']){
       const table=report.tables.find(t=>t.name===name);assert.ok(table,name);
       assert.deepEqual(table.ai_mapped_columns,[]);assert.deepEqual(table.not_directly_written_by_ai,table.columns);
     }
     for(const field of ['renewal_tag','payment_type','project_status','delivery_staff','project_note'])assert.ok(report.tables.find(t=>t.name==='contracts').ai_mapped_columns.includes(field),field);
-    assert.equal(report.operation_count,19);assert.ok(report.field_count>100);
-    assert.equal(report.item_field_count,13);
+    assert.equal(report.operation_count,17);assert.ok(report.field_count>100);
+    assert.equal(report.item_field_count,15);
     const marginRate=report.operations.find(o=>o.type==='contract').items.find(f=>f.field==='margin_rate');
     assert.equal(marginRate.kind,'derived');assert.equal(marginRate.targets[0].table,'contract_items');assert.equal(marginRate.targets[0].column,'margin');
     const quoteKind=report.operations.find(o=>o.type==='quote').items.find(f=>f.field==='kind');

@@ -15,8 +15,8 @@ export async function analyzeQuality(input,complete){
 }
 export function createQualityComplete({env=process.env,fetcher=fetch}={}){
  return async messages=>{
-  if(!env.PPIO_API_KEY)throw new Error('会议质检 AI 尚未配置');
-  const response=await fetcher(AI_ENDPOINT,{method:'POST',headers:{Authorization:'Bearer '+env.PPIO_API_KEY,'Content-Type':'application/json'},body:JSON.stringify({model:AI_MODEL,messages,max_tokens:6000,reasoning_effort:'none',stream:false}),signal:AbortSignal.timeout(120000),redirect:'error'});
+  if(!env.AI_API_KEY)throw new Error('会议质检 AI 尚未配置');
+  const response=await fetcher(AI_ENDPOINT,{method:'POST',headers:{Authorization:'Bearer '+env.AI_API_KEY,'Content-Type':'application/json'},body:JSON.stringify({model:AI_MODEL,messages,max_tokens:6000,thinking:{type:'disabled'},stream:false}),signal:AbortSignal.timeout(120000),redirect:'error'});
   if(!response.ok)throw new Error('会议质检 AI 连接未完成');
   const value=await response.json();if(value.choices?.[0]?.finish_reason!=='stop')throw new Error('会议质检未完整返回');
   return value.choices[0].message?.content;

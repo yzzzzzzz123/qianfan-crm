@@ -27,24 +27,24 @@ test('contract extraction converts exact cents, retains unknowns, flags inconsis
 });
 test('fixed-model contract provider reuses original document parser and sends only that attachment, never operations or CRM catalog',async()=>{
  let request,parsedFile;
- const ai=createIntakeAI({env:{PPIO_API_KEY:'isolated-key'},fileParser:async file=>{parsedFile=file;return {text:'隔离原文',images:[{mime:'image/jpeg',base64:'AA=='}]};},fetcher:async(url,options)=>{request={url,options,body:JSON.parse(options.body)};return reply(raw());}});
+ const ai=createIntakeAI({env:{AI_API_KEY:'isolated-key'},fileParser:async file=>{parsedFile=file;return {text:'隔离原文',images:[{mime:'image/jpeg',base64:'AA=='}]};},fetcher:async(url,options)=>{request={url,options,body:JSON.parse(options.body)};return reply(raw());}});
  const result=await ai.extractContract(txt);assert.deepEqual(parsedFile,txt);assert.equal(request.url,AI_ENDPOINT);assert.equal(request.body.model,AI_MODEL);assert.equal(request.options.redirect,'error');assert.equal(request.body.messages[1].content.length,2);assert.equal(request.body.messages[1].content[1].image_url.url,'data:image/jpeg;base64,AA==');
  const sent=JSON.parse(request.body.messages[1].content[0].text);assert.deepEqual(Object.keys(sent),['filename','original_text']);assert.equal(result.result.total_amount,10000);assert.equal(result.model,AI_MODEL);assert.equal(Object.hasOwn(result,'operations'),false);
 });
 test('provider enforces file/image limits, incomplete output and fixed schema without external calls on invalid input',async()=>{
  let calls=0;const fetcher=async()=>{calls++;return reply(raw());};
  await assert.rejects(createIntakeAI({env:{},fetcher}).extractContract(txt),/尚未配置/);assert.equal(calls,0);
- const many=createIntakeAI({env:{PPIO_API_KEY:'isolated-key'},fetcher,fileParser:async()=>({text:'x',images:Array.from({length:9},()=>({mime:'image/jpeg',base64:'AA=='}))})});
+ const many=createIntakeAI({env:{AI_API_KEY:'isolated-key'},fetcher,fileParser:async()=>({text:'x',images:Array.from({length:9},()=>({mime:'image/jpeg',base64:'AA=='}))})});
  await assert.rejects(many.extractContract(txt),/8张图片/);assert.equal(calls,0);
  await assert.rejects(many.extractContract({name:'large.txt',base64:Buffer.alloc(10*1024*1024+1).toString('base64')}),/10MB/);assert.equal(calls,0);
  await assert.rejects(many.extractContract({...txt,name:'bad.exe'}),/请上传/);assert.equal(calls,0);
  const parsed=async()=>({text:'隔离合同',images:[]});
- const truncated=createIntakeAI({env:{PPIO_API_KEY:'isolated-key'},fileParser:parsed,fetcher:async()=>({ok:true,json:async()=>({choices:[{finish_reason:'length',message:{content:'{}'}}]})})});await assert.rejects(truncated.extractContract(txt),/未完成/);
- const malicious=createIntakeAI({env:{PPIO_API_KEY:'isolated-key'},fileParser:parsed,fetcher:async()=>reply({...raw(),operations:[]})});await assert.rejects(malicious.extractContract(txt),/结构无效/);
+ const truncated=createIntakeAI({env:{AI_API_KEY:'isolated-key'},fileParser:parsed,fetcher:async()=>({ok:true,json:async()=>({choices:[{finish_reason:'length',message:{content:'{}'}}]})})});await assert.rejects(truncated.extractContract(txt),/未完成/);
+ const malicious=createIntakeAI({env:{AI_API_KEY:'isolated-key'},fileParser:parsed,fetcher:async()=>reply({...raw(),operations:[]})});await assert.rejects(malicious.extractContract(txt),/结构无效/);
 });
 test('synthetic original text uses the existing Python document parser without a real API',async()=>{
  let sent;
- const ai=createIntakeAI({env:{PPIO_API_KEY:'isolated-key'},fetcher:async(url,options)=>{sent=JSON.parse(JSON.parse(options.body).messages[1].content[0].text);return reply(raw());}});
+ const ai=createIntakeAI({env:{AI_API_KEY:'isolated-key'},fetcher:async(url,options)=>{sent=JSON.parse(JSON.parse(options.body).messages[1].content[0].text);return reply(raw());}});
  const value=await ai.extractContract(txt);assert.equal(sent.original_text,Buffer.from(txt.base64,'base64').toString());assert.equal(value.result.payment_stages.length,2);
 });
 

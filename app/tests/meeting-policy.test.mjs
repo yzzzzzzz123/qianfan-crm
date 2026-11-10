@@ -1,3 +1,4 @@
+import {historicalCommission} from './helpers/historical-commission.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {fixture,customer,archiveContract} from './helpers/fixture.mjs';
@@ -12,11 +13,11 @@ async function context(t) {
   const f=await fixture(t),admin=await f.login(1),sales=await f.login(2);
   // Fixture-only confirmation of the scope; this never modifies the user's local workspace.
   const policy=JSON.parse(one(f.db,"SELECT value FROM settings WHERE key='rules'").value).commission.sales_policy;
-  policy.service_scope_confirmed=true;
+  policy.service_scope_confirmed=true;policy.service_aggregation='month';
   assert.equal((await f.request('/rules',{actor:admin,method:'PATCH',body:{commission:{sales_policy:policy}}})).status,200);
   const c=await f.request('/customers',{actor:admin,method:'POST',body:customer({name:'听记提成验收客户',owner_id:2})});
   const create=async(product,service,date='2026-11-05')=>{
-    const items=[...(product?[{name:'产品授权',kind:'标品',amount:product}]:[]),...(service?[{name:'项目服务',kind:'实施',amount:service}]:[])];
+    const items=[...(product?[{name:'产品授权',kind:'标品',amount:product,margin:product}]:[]),...(service?[{name:'项目服务',kind:'定开',amount:service,margin:service*.5}]:[])];
     const r=await f.request('/contracts',{actor:admin,method:'POST',body:{customer_id:c.body.id,name:'听记验收合同',owner_id:2,sign_date:date,items}});
     assert.equal(r.status,200,JSON.stringify(r.body));await archiveContract(f,admin,r.body.id);return r.body.id;
   };
@@ -30,33 +31,33 @@ async function context(t) {
   return {...f,admin,sales,create,pay,review,state,preview,customerId:c.body.id};
 }
 
-test('两套提成：产品按到账月份，服务按合同金额；拆分展示、确认、补差与锁定',async t=>{
+test('两套提成：产品按回款毛利，服务按当月回款；拆分展示及历史快照、补差与锁定',async t=>{
   const f=await context(t),id=await f.create(60000,40000),payment=await f.pay(id,40000,30000);
   let p=await f.preview();assert.equal(p.blocked,true);assert.match(p.issues.join('；'),/绩效/);
-  assert.equal((await f.request('/commissions/confirm',{actor:f.admin,method:'POST',body:p})).status,409);
+  assert.equal((await f.request('/commissions/confirm',{actor:f.admin,method:'POST',body:p})).status,410);
   await f.review();p=await f.preview();assert.equal(p.grade,'B');assert.equal(p.blocked,false);
-  assert.deepEqual(p.components.map(c=>[c.base,c.total]),[[3000000,300000],[4000000,320000]]);
-  assert.equal(p.total,620000);assert.equal(p.lines.reduce((s,l)=>s+l.amount,0),p.due);
-  const confirmed=await f.request('/commissions/confirm',{actor:f.admin,method:'POST',body:p});assert.equal(confirmed.status,200,JSON.stringify(confirmed.body));
+  assert.deepEqual(p.components.map(c=>[c.base,c.total]),[[3000000,300000],[1000000,50000]]);
+  assert.equal(p.total,350000);assert.equal(p.lines.reduce((s,l)=>s+l.amount,0),p.due);
+  const confirmed=historicalCommission(f,p);assert.equal(confirmed.status,200,JSON.stringify(confirmed.body));
   const snapshot=one(f.db,'SELECT snapshot FROM commission_batches WHERE id=?',confirmed.body.id).snapshot;
   assert.deepEqual(all(f.db,'SELECT component FROM commission_lines WHERE batch_id=? ORDER BY id',confirmed.body.id).map(l=>l.component),['product','service']);
   assert.equal((await f.preview()).due,0);
   assert.equal((await f.request(`/payments/${payment}/allocation`,{actor:f.admin,method:'POST',body:{product_amount:31000,reason:'不可改已确认依据'}})).status,409);
   await f.pay(id,20000,20000);
-  assert.equal((await f.request('/commissions/confirm',{actor:f.admin,method:'POST',body:p})).status,409);
-  const changed=await f.preview();assert.equal(changed.components[0].rate,.12);assert.equal(changed.total,920000);assert.equal(changed.due,300000);
+  assert.equal((await f.request('/commissions/confirm',{actor:f.admin,method:'POST',body:p})).status,410);
+  const changed=await f.preview();assert.equal(changed.components[0].rate,.12);assert.equal(changed.total,650000);assert.equal(changed.due,300000);
   assert.equal(changed.lines.reduce((s,l)=>s+l.amount,0),300000);
-  assert.equal((await f.request('/commissions/confirm',{actor:f.admin,method:'POST',body:changed})).status,200);
+  historicalCommission(f,changed);
   assert.equal(one(f.db,'SELECT snapshot FROM commission_batches WHERE id=?',confirmed.body.id).snapshot,snapshot);
   assert.equal((await f.request('/commissions/confirm',{actor:f.sales,method:'POST',body:changed})).status,403);
 });
 
-test('多合同产品回款按月合计，服务按单合同选档且不依赖回款；旧签约新回款可计产品',async t=>{
+test('多合同回款毛利和服务回款各按月合计，旧签约新回款仍进入到账月',async t=>{
   const f=await context(t),a=await f.create(15000,15000),b=await f.create(15000,15000),old=await f.create(10000,0,'2026-10-10');
-  await f.pay(a,15000,15000);await f.pay(b,15000,15000);await f.pay(old,10000);
+  await f.pay(a,30000,15000);await f.pay(b,30000,15000);await f.pay(old,10000);
   await f.review();const p=await f.preview();
   assert.equal(p.components[0].base,4000000);assert.equal(p.components[0].rate,.12);assert.equal(p.components[0].total,480000);
-  assert.equal(p.components[1].base,3000000);assert.equal(p.components[1].total,150000);
+  assert.equal(p.components[1].base,3000000);assert.equal(p.components[1].total,240000);
   assert.ok(!p.lines.some(l=>l.contract_id===old&&l.component==='service'));
 });
 
@@ -65,13 +66,13 @@ test('产品金额各档边界整额跳档，确认D级5%和12%，其余空白�
   const payment=await f.pay(id,1);
   const expected=[[19999.99,0],[20000,.10],[39999.99,.10],[40000,.12],[79999.99,.12],[80000,.18],[159999.99,.18],[160000,.20]];
   for(const [amount,rate] of expected) {
-    run(f.db,'UPDATE payments SET amount=? WHERE id=?',Math.round(amount*100),payment);
+    run(f.db,'UPDATE payments SET amount=?,product_amount=? WHERE id=?',Math.round(amount*100),Math.round(amount*100),payment);
     const p=await f.preview();assert.equal(p.components[0].rate,rate,String(amount));assert.equal(p.total,Math.round(amount*100*rate));assert.equal(p.blocked,false);
   }
   const rules=JSON.parse(one(f.db,"SELECT value FROM settings WHERE key='rules'").value);
   const actor=one(f.db,'SELECT * FROM users WHERE id=1');
   for(const [score,amount,rate] of [[50,20000,.05],[50,39999.99,.05],[50,160000,.12],[50,200000,.12],[90,10000,null]]) {
-    run(f.db,'UPDATE payments SET amount=? WHERE id=?',amount*100,payment);
+    run(f.db,'UPDATE payments SET amount=?,product_amount=? WHERE id=?',amount*100,amount*100,payment);
     run(f.db,"UPDATE performance_reviews SET snapshot=json_set(snapshot,'$.grade',?) WHERE user_id=2 AND month='2026-11'",score===50?'D':'A');
     const p=commissionPreview(f.db,rules,actor,'2026-11').previews.find(p=>p.sales_id===2);assert.equal(p.components[0].rate,rate);
     if(rate===null){assert.equal(p.blocked,true);assert.match(p.issues.join('；'),/比例待核实/);}
@@ -107,12 +108,12 @@ test('对客报价跟进计分，同商机同日报价资料与跟进不重复�
 });
 
 test('服务选档范围未确认仅可试算；管理员明确选择月合计后按月服务总额选档',async t=>{
-  const f=await context(t);await f.create(0,15000);await f.create(0,15000);await f.review();
+  const f=await context(t);const a=await f.create(0,15000),b=await f.create(0,15000);await f.pay(a,15000);await f.pay(b,15000);await f.review();
   const policy=JSON.parse(one(f.db,"SELECT value FROM settings WHERE key='rules'").value).commission.sales_policy;
   policy.service_scope_confirmed=false;
   assert.equal((await f.request('/rules',{actor:f.admin,method:'PATCH',body:{commission:{sales_policy:policy}}})).status,200);
-  let p=await f.preview();assert.equal(p.components[1].total,150000);assert.equal(p.blocked,true);assert.match(p.issues.join('；'),/单合同还是当月合计/);
-  assert.equal((await f.request('/commissions/confirm',{actor:f.admin,method:'POST',body:p})).status,409);
+  let p=await f.preview();assert.equal(p.components[1].total,240000);assert.equal(p.blocked,true);assert.match(p.issues.join('；'),/当月实际服务回款合计选档/);
+  assert.equal((await f.request('/commissions/confirm',{actor:f.admin,method:'POST',body:p})).status,410);
   policy.service_scope_confirmed=true;policy.service_aggregation='month';
   assert.equal((await f.request('/rules',{actor:f.admin,method:'PATCH',body:{commission:{sales_policy:policy}}})).status,200);
   p=await f.preview();assert.equal(p.components[1].total,240000);assert.equal(p.blocked,false);
@@ -156,23 +157,23 @@ test('可选择十月并从指定月份启用新梯度，重新试算保留已�
   let r=await f.request('/payments',{actor:f.admin,method:'POST',body:{contract_id:id,amount:30000,status:'已到账',pay_date:'2026-10-10'}});assert.equal(r.status,200,JSON.stringify(r.body));
   r=await f.request('/performance/review',{actor:f.admin,method:'POST',body:{user_id:2,month:'2026-10',final_score:80,reason:'测试十月绩效',status:'confirmed'}});assert.equal(r.status,200);
   const october=async()=>(await f.request('/state?commissionPeriod=2026-10',{actor:f.admin})).body.commission;
-  let state=await october();const trial=state.previews.find(p=>p.sales_id===2);assert.equal(trial.scheme,'sales-20261101');assert.equal(trial.blocked,true);assert.equal(trial.total,300000);assert.equal(state.trial_only,true);
-  assert.equal((await f.request('/commissions/confirm',{actor:f.admin,method:'POST',body:trial})).status,409);
+  let state=await october();const trial=state.previews.find(p=>p.sales_id===2);assert.equal(trial.scheme,'sales-receipt-margin-v2');assert.equal(trial.blocked,true);assert.equal(trial.total,300000);assert.equal(state.trial_only,true);
+  assert.equal((await f.request('/commissions/confirm',{actor:f.admin,method:'POST',body:trial})).status,410);
   const policy=JSON.parse(one(f.db,"SELECT value FROM settings WHERE key='rules'").value).commission.sales_policy;policy.effective_month='2026-10';
   assert.equal((await f.request('/rules',{actor:f.admin,method:'PATCH',body:{commission:{sales_policy:policy}}})).status,200);
-  state=await october();let preview=state.previews.find(p=>p.sales_id===2&&p.scheme===policy.version);assert.equal(preview.components[0].base,3000000);assert.equal(preview.total,300000);assert.equal(preview.blocked,false);
-  r=await f.request('/commissions/confirm',{actor:f.admin,method:'POST',body:preview});assert.equal(r.status,200,JSON.stringify(r.body));
+  state=await october();let preview=state.previews.find(p=>p.sales_id===2&&p.scheme==='sales-receipt-margin-v2');assert.equal(preview.components[0].base,3000000);assert.equal(preview.total,300000);assert.equal(preview.blocked,false);
+  r=historicalCommission(f,preview);assert.equal(r.status,200,JSON.stringify(r.body));
   const snapshot=one(f.db,'SELECT snapshot FROM commission_batches WHERE id=?',r.body.id).snapshot;
   policy.product[1].rates.B=.11;assert.equal((await f.request('/rules',{actor:f.admin,method:'PATCH',body:{commission:{sales_policy:policy}}})).status,200);
-  preview=(await october()).previews.find(p=>p.sales_id===2&&p.scheme===policy.version);assert.equal(preview.total,330000);assert.equal(preview.due,30000);
+  preview=(await october()).previews.find(p=>p.sales_id===2&&p.scheme==='sales-receipt-margin-v2');assert.equal(preview.total,330000);assert.equal(preview.due,30000);
   assert.equal(one(f.db,'SELECT snapshot FROM commission_batches WHERE id=?',r.body.id).snapshot,snapshot);
   policy.effective_month='2026-11';assert.equal((await f.request('/rules',{actor:f.admin,method:'PATCH',body:{commission:{sales_policy:policy}}})).status,400);
 });
 
 test('服务梯度未填写时展示待核实并阻止确认，不能默认为零',async t=>{
-  const f=await context(t);await f.create(0,15000);await f.review();
+  const f=await context(t);const id=await f.create(0,15000);await f.pay(id,15000);await f.review();
   const policy=JSON.parse(one(f.db,"SELECT value FROM settings WHERE key='rules'").value).commission.sales_policy;policy.service[1].rates.B=null;
   assert.equal((await f.request('/rules',{actor:f.admin,method:'PATCH',body:{commission:{sales_policy:policy}}})).status,200);
-  const p=await f.preview();assert.equal(p.blocked,true);assert.match(p.issues.join('；'),/项目服务.*比例待核实/);
-  assert.equal((await f.request('/commissions/confirm',{actor:f.admin,method:'POST',body:p})).status,409);
+  const p=await f.preview();assert.equal(p.blocked,true);assert.match(p.issues.join('；'),/开发运维.*比例待核实/);
+  assert.equal((await f.request('/commissions/confirm',{actor:f.admin,method:'POST',body:p})).status,410);
 });

@@ -1,3 +1,4 @@
+import {canManageContractData} from './modules/contract-access.js';
 import {collectionsPage,formWorkflow} from './modules/contract-workflow.js';
 import {
   esc,
@@ -62,10 +63,13 @@ export function pageHeader(S, P) {
   const page = P.view;
   let buttons=page==='minutes'?(S.actor.role==='admin'?'':badge('本人账号授权','blue'))+button('刷新数据','minutes-list-refresh','','secondary','refresh'):'';
   if(manualEntryEnabled(S,P))buttons=button('手动导入','manual-entry','','primary','plus');
+  if(page==='contracts'&&canManageContractData(S))buttons=(S.actor.role==='admin'?button('迁移核对','data-review','','secondary'):'')+button('删除与恢复','records-recycle','','secondary')+button('历史台账','contract-history','','secondary','clock')+button('新增合同','new-contract','','primary','plus');
+  if(page==='collections'&&canManageContractData(S))buttons=button('新增收款计划','new-payment-plan','','secondary','plus')+button('登记实际到账','new-payment','','primary','wallet');
   if(S.actor.role==='admin'&&page==='customers')buttons=button('维护客户等级','customer-levels','','secondary','edit')+buttons;
   if(S.actor.role==='admin'&&page==='opportunities')buttons=button('维护阶段规则','stage-rules','','secondary','edit')+buttons;
   if(S.actor.role==='admin'&&page==='contracts')buttons=button('维护公司模板','document-templates','','secondary','edit')+buttons;
-  if(['customers','contracts','commissions','performance'].includes(page))buttons=button('导出台账','export','','secondary','download')+buttons;
+  if(['customers','contracts','performance'].includes(page))buttons=button('导出台账','export','','secondary','download')+buttons;
+  if(page==='commissions')buttons=button('导出','commission-export-choose','','secondary','download')+buttons;
   const d = new Date(S.today + "T12:00:00+08:00");
   const date = d.toLocaleDateString("zh-CN", {
     month: "long",
@@ -73,6 +77,8 @@ export function pageHeader(S, P) {
     weekday: "long",
     timeZone: "Asia/Shanghai",
   });
+  if(page==='collections'&&canManageContractData(S))buttons=(S.actor.role==='admin'?button('迁移核对','data-review','','secondary'):'')+button('删除与恢复','records-recycle','','secondary')+buttons;
+  if(page==='performance'&&S.actor.role==='admin')buttons=button('结算差额核对','settlement-review','','secondary')+buttons;
   return `<div class="page-heading ${page==='minutes'?'minutes-heading':''}"><div><h1>${page === "workbench" ? `${esc(S.actor.name)}，${new Date().getHours() < 12 ? "上午" : "下午"}好` : S.actor.role === "sales" && page === "team" ? "过程绩效" : page==='minutes'&&S.actor.role==='sales'?'我的钉钉听记':pages[page][0]}</h1>${page==='minutes'?`<p>${S.actor.role==='admin'?'查看所有成员已授权的闪记、录音与同步进度，可按账号筛选。':'本人创建的闪记与录音，默认查看全部听记。'}</p>`:''}${page==='workbench'?`<p>${date}</p>`:''}</div><div class="heading-actions">${buttons}</div></div>`;
 }
 
@@ -100,7 +106,7 @@ export function renderPage(S, P) {
 }
 
 export function formContent(S, type, id, quarter) {
-  if(['contract-delete','payment-maintain','contract-maintain','contract-project','item-margin','payment-plan','contract-extract','collection-receive'].includes(type))return formWorkflow(S,type,id);
+  if(['contract-delete','payment-maintain','contract-maintain','contract-project','contract-meta','contract-items','contract-upload','contract-terminate','payment-plan-create','payment-void','payment-reconcile','item-margin','payment-plan','contract-extract','collection-receive'].includes(type))return formWorkflow(S,type,id);
   if(type==='customer-level')return formCustomers(S,type,id,formOptions(S));
   if(type==='payment-allocation')return formContracts(S,type,id,formOptions(S));
   if(type==='target')return targetForm(S,id,quarter);
@@ -120,7 +126,6 @@ export function formContent(S, type, id, quarter) {
     return formContracts(S,type,id,options);
   }
   if(['document-templates','rules','finance-rules','sales-commission-policy','customer-levels','performance-rules'].includes(type))return formSettings(S,type,id,options);
-  if(type==='commission-confirm')return S.commission.previews[Number(id)]?formIncentives(S,type,id,options):empty('没有可确认的结算记录');
-  if(type==='commission-pay')return formIncentives(S,type,id,options);
+  if(['commission-confirm','commission-pay','commission-live-pay'].includes(type))return empty('提成按最新资料实时计算','当前只查看实时金额和异常提示，无需确认或登记发放。');
   return empty('资料统一交给AI接收','上传文件或描述要新增、修改的数据，校验通过后再确认入库。',button('前往AI接收','ai-start','','primary','note'));
 }

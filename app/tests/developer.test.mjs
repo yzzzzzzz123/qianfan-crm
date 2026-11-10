@@ -6,6 +6,7 @@ import { sessionControl } from '../public/modules/developer-session.js';
 import { auditView } from '../public/modules/audit.js';
 import { api } from '../public/api.js';
 import { refreshDailyReport } from '../server/scheduler.mjs';
+import {presenceMembers} from '../public/modules/developer-presence.js';
 
 async function developer(t,options={}) {
   const f=await fixture(t,{localIdentitySwitch:true,identityProvider:{loginConfigured:true,identity:async()=>({unionId:'verified-developer',seconds:7200})},...options});
@@ -14,6 +15,21 @@ async function developer(t,options={}) {
   const result=await f.request('/auth/dingtalk/callback',{method:'POST',body:{code:'test-only-code'}});assert.equal(result.status,200);
   return {...f,operator:{cookie:result.cookie.split(';')[0],csrf:result.body.csrf}};
 }
+
+test('在线名单与人数隐藏开发者，保留真实业务用户及开发者认证',async t=>{
+  const f=await developer(t),actor=f.operator,sales=await f.login(2);
+  const heartbeat={tab_id:'isolated-presence-tab-0001',page:'workbench',visible:true,idle_ms:0};
+  assert.equal((await f.request('/auth/presence',{actor,method:'POST',headers:{'X-CRM-Act-As':'2'},body:heartbeat})).status,200);
+  assert.equal((await f.request('/auth/presence',{actor:sales,method:'POST',body:{...heartbeat,tab_id:'isolated-presence-tab-0002'}})).status,200);
+  const viewed=await f.request('/developer/presence',{actor});assert.equal(viewed.status,200);
+  assert.deepEqual(viewed.body.members.map(user=>user.id),[2]);assert.equal(viewed.body.online_count,1);assert.equal(viewed.body.active_count,1);
+  assert.equal((await f.request('/auth/me',{actor})).body.actor.name,'余志政');
+  assert.equal(one(f.db,'SELECT active FROM users WHERE id=4').active,1);
+  assert.equal((await f.request('/developer/presence',{actor:sales})).status,403);
+  const html=presenceMembers([{id:4,name:'余志政',role:'developer',status:'active',page:'工作台',tab_count:1},...viewed.body.members]);
+  assert.doesNotMatch(html,/余志政|志政|开发人员/);assert.match(html,/祝天/);
+  assert.match(presenceMembers([{id:4,name:'余志政',role:'developer',status:'active',page:'工作台',tab_count:1}]),/当前没有在线成员/);
+});
 
 test('开发者直接进入业务成员工作区，切换保留真实会话并按目标权限隔离',async t=>{
   const f=await developer(t),actor=f.operator;

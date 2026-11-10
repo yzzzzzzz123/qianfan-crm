@@ -5,33 +5,15 @@ import { one } from "../server/database.mjs";
 import { today } from "../server/domain.mjs";
 import { fixture } from "./helpers/fixture.mjs";
 
-test("M07-A01 销售不能确认回款计划，拒绝后计划与余额不变", async (t) => {
-  const f = await fixture(t);
-  const actor = await f.login(2);
-  const before = one(
-    f.db,
-    "SELECT * FROM payments WHERE contract_id=1 AND status!='已到账'",
-  );
-  assert.equal(
-    (
-      await f.request(`/payments/${before.id}/receive`, {
-        actor,
-        method: "POST",
-        body: { pay_date: today() },
-      })
-    ).status,
-    403,
-  );
-  assert.equal(
-    one(f.db, "SELECT status FROM payments WHERE id=?", before.id).status,
-    before.status,
-  );
-  assert.equal(
-    (await f.request("/state", { actor })).body.contracts.find(
-      (c) => c.id === 1,
-    ).outstanding,
-    8000000,
-  );
+test('M07-A01 销售可确认本人计划，其他销售越权拒绝且余额不变',async t=>{
+ const f=await fixture(t),actor=await f.login(2),other=await f.login(3);
+ const before=one(f.db,"SELECT * FROM payments WHERE contract_id=1 AND status!='已到账'");
+ const paid=one(f.db,"SELECT COALESCE(SUM(amount),0) total FROM payments WHERE contract_id=1 AND status='已到账'").total;
+ assert.equal((await f.request(`/payments/${before.id}/receive`,{actor:other,method:'POST',body:{pay_date:today()}})).status,403);
+ assert.equal(one(f.db,"SELECT COALESCE(SUM(amount),0) total FROM payments WHERE contract_id=1 AND status='已到账'").total,paid);
+ const r=await f.request(`/payments/${before.id}/receive`,{actor,method:'POST',body:{pay_date:today()}});assert.equal(r.status,200);
+ assert.notEqual(r.body.id,before.id);assert.equal(one(f.db,'SELECT status FROM payments WHERE id=?',before.id).status,before.status);
+ assert.equal(one(f.db,"SELECT COALESCE(SUM(amount),0) total FROM payments WHERE contract_id=1 AND status='已到账'").total,paid+before.amount);
 });
 
 test("M07-A02 回款重复提交只写一笔，内容冲突和超额到账被拒绝", async (t) => {

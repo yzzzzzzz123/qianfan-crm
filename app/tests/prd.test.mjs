@@ -1,3 +1,4 @@
+import {historicalCommission} from './helpers/historical-commission.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { fixture,customer,opp,archiveContract } from './helpers/fixture.mjs';
@@ -24,20 +25,20 @@ async function deal(f,admin,customerId,amount,extra={}) {
   return r.body.id;
 }
 const state=async(f,actor,query='?commissionPeriod='+quarter())=>(await f.request('/state'+query,{actor})).body;
-test('PRD-M5 季度20万边界、全额跳档补差、确认锁定及发放幂等',async t=>{
+test('PRD-M5 季度20万边界、全额跳档补差、历史锁定及退役发放入口',async t=>{
   const f=await fixture(t),admin=await f.login(1),uid=await participant(f,admin),cid=await account(f,admin,uid);
   const first=await deal(f,admin,cid,400000,{historicalRates:[0.5]});
   let s=await state(f,admin),p=s.commission.previews.find(p=>p.sales_id===uid);
   assert.equal(p.period,quarter());assert.equal(p.base,20000000);assert.equal(p.rate,0.03);assert.equal(p.due,600000);
-  const confirmed=await f.request('/commissions/confirm',{actor:admin,method:'POST',body:p});assert.equal(confirmed.status,200);
+  const confirmed=historicalCommission(f,p);assert.equal(confirmed.status,200);
   assert.equal((await f.request(`/items/${s.contracts.find(c=>c.id===first).items[0].id}`,{actor:admin,method:'PATCH',body:{margin:1,reason:'锁定校验'}})).status,409);
   await deal(f,admin,cid,2,{historicalRates:[0.5]});
-  assert.equal((await f.request('/commissions/confirm',{actor:admin,method:'POST',body:p})).status,409);
+  assert.equal((await f.request('/commissions/confirm',{actor:admin,method:'POST',body:p})).status,410);
   s=await state(f,admin);p=s.commission.previews.find(p=>p.sales_id===uid);
   assert.equal(p.base,20000100);assert.equal(p.rate,0.05);assert.equal(p.total,1000005);assert.equal(p.due,400005);assert.equal(p.lines.reduce((s,l)=>s+l.amount,0),p.due);
-  assert.equal((await f.request('/commissions/confirm',{actor:admin,method:'POST',body:p})).status,200);
-  assert.equal((await f.request(`/commissions/${confirmed.body.id}/pay`,{actor:admin,method:'POST',body:{paid_at:today()}})).status,200);
-  assert.equal((await f.request(`/commissions/${confirmed.body.id}/pay`,{actor:admin,method:'POST',body:{paid_at:today()}})).status,409);
+  historicalCommission(f,p);
+  run(f.db,"UPDATE commission_batches SET status='paid',paid_at='2026-12-01' WHERE id=?",confirmed.body.id);
+  assert.equal((await f.request(`/commissions/${confirmed.body.id}/pay`,{actor:admin,method:'POST',body:{paid_at:today()}})).status,410);
   const sales=await f.login(uid),own=await state(f,sales);
   assert.ok(own.commission.previews.every(p=>p.sales_id===uid));assert.ok(own.commission.batches.every(p=>p.sales_id===uid));assert.equal(own.commission.previews[0].due,0);
   assert.equal((await f.request('/commissions/confirm',{actor:sales,method:'POST',body:p})).status,403);

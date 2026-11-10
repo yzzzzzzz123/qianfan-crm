@@ -177,7 +177,8 @@ test("提成结算内维护团队规则，不重复个人梯度或绩效配置",
   assert.match(page,/调整个人提成梯度/);assert.match(page,/调整团队提成规则/);
   assert.doesNotMatch(form,/rate:product|rate:service|performance:|service_aggregation/);
   for(const key of ['standard_self_new','standard_distributed_new','standard_renewal','implementation'])assert.ok(!form.includes('commission:'+key));
-  for(const key of ['period','threshold','low_rate','high_rate','manager_id','unlock_by_payment'])assert.ok(form.includes('commission:'+key));
+  for(const key of ['threshold','low_rate','high_rate','manager_id'])assert.ok(form.includes('commission:'+key));
+  assert.doesNotMatch(form,/name="commission:(?:period|unlock_by_payment)"/);assert.match(form,/月度按其他销售的实际回款毛利/);
   const before=structuredClone(state.rules.commission.sales_policy);
   assert.equal((await f.request('/rules',{actor,method:'PATCH',body:{commission:{low_rate:0.04}}})).status,200);
   assert.deepEqual((await f.request('/state',{actor})).body.rules.commission.sales_policy,before);

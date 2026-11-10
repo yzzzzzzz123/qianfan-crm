@@ -1,10 +1,13 @@
 // Business meaning only. Physical columns are always inspected from the live database.
 export const tablePurposes={
+  contract_expenses:'按合同明细逐笔登记的合同费用支出、收款方及可选凭证；合计回写明细费用并仅扣减一次毛利',
+  record_recycle_bin:'管理员删除回款或附件的可恢复原始快照及核销关系、原因和操作者',
+  payment_plan_links:'实际到账与收款计划的逐笔核销关系；不重复计入现金，部分核销保留余款',contract_exit_requests:'生效合同终止申请、操作人核对结果与保留账务的处理依据',
   minutes_sources:'成员本人核验并授权的听记账号及新增采集起点',minutes_authorizations:'钉钉设备授权任务与明确确认连接状态',minutes_records:'经接口读取的真实听记及人工业务关联',minutes_artifacts:'总结、逐字稿等源产物的独立读取状态与内容',minutes_sync_runs:'听记增量及历史读取的分页、结果与失败回执',
   customers:'客户档案、去重与业务归属',customer_profiles:'可信企业接口返回的独立客户详细信息、来源和读取状态；不由文本模型编造',contacts:'客户联系人及决策链',customer_collaborators:'客户与协作成员的一对多权限关系',
   company_profile_jobs:'每个客户唯一的企业资料查询任务、工商与简介续读进度及重试状态；不复制客户业务主档',company_profile_queue_control:'企业资料查询队列的单一运行租约及额度不足暂停状态；不保存账户余额或查询密钥',
   opportunities:'七阶段商机、合同总额、产品金额与销售分类',stage_history:'商机阶段变化的历史证据',activities:'商机跟进时间线',activity_events:'多来源跟进归并后的逐次计分证据',
-  quotes:'报价原价、折扣与结构化明细',contracts:'合同草稿、正式归档、履约与续费',contract_items:'独立合同行项的金额、人天、日期和已知毛利',payments:'单笔到账及付款计划',
+  quotes:'报价原价、折扣与结构化明细',contracts:'已签署合同、可选附件归档、履约与续费及保留的旧草稿',contract_items:'独立合同行项的金额、人天、日期和已知毛利',payments:'单笔到账及收款计划',
   attachments:'经确认归属于业务记录的实际文件',contract_attachment_analyses:'合同附件AI提取的独立核对提案与读取状态；不直接改写合同金额或付款事实',source_records:'真实来源行、来源位置、导入时间及去重指纹',
   targets:'管理员手动设置的季度合同目标',performance_reviews:'管理员过程评分及确认后的月度绩效快照',commission_batches:'历史规则结算批次及发放状态',commission_lines:'已确认提成对应到合同和行项的不可变计算证据',
   users:'团队成员、角色、启用状态及开发者权限隔离',ding_identities:'已核验钉钉unionId到内部成员的唯一绑定',sessions:'钉钉登录会话、过期时间及CSRF校验',
@@ -12,6 +15,7 @@ export const tablePurposes={
   audit:'业务修改、权限变更与实际操作者审计',mutations:'写入请求幂等去重及原响应',workspace_revision:'并发修改版本及AI确认前的资料版本校验',daily_reports:'已停用自动生成的历史日报快照，保留原记录供追溯',schema_version:'已完成数据库迁移的版本记录',
 };
 export const commonColumnPurposes={
+  reference_no:'本笔实际到账的银行流水号或凭证号，用于核对疑似重复款项',voided_at:'收款计划未核销余款的作废时间，不作废已到账流水',void_reason:'收款计划余款作废的明确依据',terminated_at:'合同经管理员核对后的终止时间，原应收实收与提成继续保留',termination_reason:'合同终止的管理员核对说明',
   id:'本表记录主键',name:'记录的业务名称',created_at:'记录建立时间',updated_at:'最近维护时间',
   owner_id:'日常新增必填；有来源依据的历史未映射销售保留NULL，不创建占位成员',customer_id:'关联客户档案',opportunity_id:'关联商机',contract_id:'关联合同',
   user_id:'关联内部成员',amount:'金额，持久化单位为整数分',note:'业务补充说明',valid_until:'有效期或到期日',
@@ -22,6 +26,10 @@ export const commonColumnPurposes={
   key:'配置或幂等记录的唯一键',version:'版本号',
 };
 export const columnPurposes={
+  contract_expenses:{item_id:'所属合同明细编号',amount:'本笔合同费用支出，整数分，正金额',description:'本笔费用事由',incurred_on:'实际发生日期，可空，不能猜补历史日期',payee:'费用收款方，选填',reference_no:'费用凭证号，选填',attachment_id:'本合同已有凭证附件，选填',entry_kind:'detail为已逐笔核对费用；aggregate为历史或合计字段同步的待补明细记录',created_by:'登记费用的管理员，历史合计同步记录可空',created_at:'费用记录建立时间',updated_at:'最后一次费用维护时间',deleted_at:'移入回收站时间，NULL为有效费用',delete_reason:'移除费用的明确原因'},
+  record_recycle_bin:{record_id:'删除前原记录编号，恢复时不覆盖其他记录',payload:'仅后端可读的原行与核销关系JSON快照',deleted_by:'执行删除的管理员编号',deleted_at:'移入回收站时间',restored_at:'成功恢复时间，未恢复为NULL'},
+  payment_plan_links:{plan_id:'原收款计划编号',receipt_id:'本次核销所使用的实际到账编号',created_by:'明确执行本次核销的管理员'},
+  contract_exit_requests:{requested_by:'发起终止申请的业务成员',reviewed_by:'核对终止申请的管理员',reviewed_at:'管理员处理申请的时间',review_note:'管理员同意终止或退回申请的依据'},
   minutes_sources:{provider:'实际来源通道：dws企业授权或personal_mcp个人只读授权',member_id:'听记账号所属业务成员',corp_id:'企业来源的已核验组织标识；个人来源为NULL，不伪造企业组织',user_id:'企业来源的源平台账号标识，不等同于企业通讯录userId；个人通道未返回账号编号时为NULL',account_name:'经源核验或本人明确确认的来源账号名称；个人通道未返回昵称时使用本人确认的标签',corp_name:'企业来源实际组织名称；个人来源为个人听记说明，不代表企业组织',credential_key:'项目独立凭据目录的随机键，凭据正文不进入数据库或前端',connection_state:'已连接或已停止',collect_from:'首次明确连接时刻，作为新增听记采集起点；历史听记由独立任务读取',synced_until:'已完成分页采集的结束水位',last_synced_at:'最近成功或部分完成的接口采集时间'},
   minutes_authorizations:{member_id:'发起本人授权的业务成员',candidate:'核验后的账号身份，不含凭据',credential_key:'复用已授权凭据目录的随机键，重新核验与切换组织不复制令牌',verified_profiles:'经过当前CRM成员本人身份核验的组织选项，不直接展示连接工具保存的其他账号',error_message:'脱敏后的实际授权失败原因',source_id:'明确确认后建立的听记账号',expires_at:'本次授权截止时间',finished_at:'授权结束时间'},
   minutes_records:{source_id:'所属已授权听记账号',external_id:'钉钉听记真实标识，与账号组成去重键',title:'源平台返回的会议主题',start_time:'源平台会议开始时间',duration_ms:'源平台返回的时长，毫秒',media_state:'录音读取可用、受限、缺失或失败状态',media_reason:'录音当前状态的实际原因',revision:'人工关联版本，防止旧页面覆盖新关联',synced_at:'最近接口读取时间'},
@@ -39,9 +47,9 @@ export const columnPurposes={
   activities:{user_id:'实际登记跟进的成员',minutes_record_id:'明确关联商机后生成的唯一听记总结；自动摘要不作为手工活动计分'},
   activity_events:{activity_id:'所归并的时间线跟进记录',user_id:'原始跟进的实际登记者',credited_user_id:'本次跟进计入过程分的成员'},
   quotes:{user_id:'报价归属成员',items:'结构化报价行：产品/服务、数量、原价单价、折扣及折后额；原价合计与优惠合计由明细计算，不重复存储'},
-  contracts:{retired_at:'历史重导后退出当前业务的时间；保留合同、回款与附件原记录，不等同双方盖章归档',renewal_tag:'独立产品续费标签：新签（自建）/新签（分发）/续费/经销品，历史未知保留NULL',payment_type:'独立付款类型：客户直付天元/千帆收款，不由到账状态推断',project_status:'七态项目履约状态，不由旧验收状态或实际回款推定',delivery_staff:'明确填写的研发交付人员，未提供不推断为合同PM',project_note:'项目交付补充说明，和合同范围分别维护',sign_date:'明确的签约日期',scope:'合同交付范围',contract_no:'正式合同编号',collaborator_pm:'合同履约协作PM',sale_type:'合同销售分类，独立合同可单独维护',order_type:'合同订单类型',lifecycle:'草稿/已归档/历史登记，历史登记不伪造双方盖章事实',archived_at:'双方盖章确认归档时间',archived_by:'明确确认归档的管理员',archive_attachment_id:'本合同双方盖章PDF/图片附件编号',commission_policy:'legacy保留已有历史提成，pending阻止新业务套用旧规则'},
-  contract_items:{kind:'标品/实施/定开/交付/运维；未分类仅用于确有原始依据的历史记录',rate:'已知历史返点比例，未知为NULL',margin:'已核验毛利，整数分；未知为NULL，修改需要原因且受结算锁保护',payment_date:'该行项计划回款日期',man_days:'实施及服务工作量人天'},
-  payments:{product_amount:'本笔实际回款中的产品金额，整数分；NULL表示尚未分配，不能猜为0',status:'该笔待到账/已到账/逾期；合同回款状态由实际到账合计派生',pay_date:'实际到账日，仅已到账记录填写',promise_date:'承诺付款日',checkpoint_date:'管理者催办检查点'},
+  contracts:{retired_at:'退出当前业务的时间；保留合同、回款与附件原记录，不等同合同签署或附件归档',renewal_tag:'独立产品续费标签：新签（自建）/新签（分发）/续费/经销品，历史未知保留NULL',payment_type:'独立付款类型：客户直付天元/千帆收款，不由到账状态推断',project_status:'七态项目履约状态，不由旧验收状态或实际回款推定',delivery_staff:'明确填写的研发交付人员，未提供不推断为合同PM',project_note:'项目交付补充说明，和合同范围分别维护',sign_date:'明确的签约日期',scope:'合同交付范围',contract_no:'正式合同编号',collaborator_pm:'合同履约协作PM',sale_type:'合同销售分类，独立合同可单独维护',order_type:'合同订单类型',lifecycle:'物理值草稿/已归档/历史登记；已归档为已签署生效的兼容值，页面显示已签署，不代表已有签章附件；新增合同直接生效，旧草稿和历史登记不自动改写',archived_at:'实际签署附件确认归档时间；仅确认签署但无附件时保持NULL',archived_by:'实际归档签署附件的操作人（管理员或合同所属销售）；无附件签署时保持NULL',archive_attachment_id:'可选的本合同签署PDF/图片归档附件编号；普通补传附件不自动设置，未提供附件保持NULL',commission_policy:'legacy保留已有历史提成，pending阻止新业务套用旧规则'},
+  contract_items:{business_expense:'合同费用支出，整数分，默认0；扣减前毛利后得到margin',margin_before_expense:'扣合同费用支出前毛利，历史已知值保留；新实施/交付默认明细全额',retired_at:'管理员移除的历史行项，保留已结算引用',kind:'标品/实施/定开/交付/运维；未分类仅用于确有原始依据的历史记录',rate:'已知历史返点比例，未知为NULL',margin:'已核验毛利，整数分；未知为NULL，修改需要原因且受结算锁保护',payment_date:'该行项计划回款日期',man_days:'实施及服务工作量人天'},
+  payments:{product_amount:'本笔实际回款中的产品金额，整数分；NULL表示尚未分配，不能猜为0',status:'该笔待到账/已到账/逾期；合同回款状态由实际到账合计派生',pay_date:'实际到账日，仅已到账记录填写',promise_date:'预计收款日',checkpoint_date:'管理者催办检查点'},
   attachments:{mime_type:'实际文件类型',size:'文件字节数',source_path:'原文件相对来源路径',created_by:'确认保存附件的内部成员'},
   source_records:{source_table:'导入来源类别，如业务工作表、附件或历史结构',source_id:'来源内的原始记录业务标识',payload:'原始字段与来源元数据JSON，保留追溯证据',source_file:'具体来源文件',sheet_name:'原Excel工作表名称；非表格附件为空',row_number:'源工作表行号',imported_at:'实际入库时间',fingerprint:'来源行内容去重指纹',status:'已导入或历史归档状态',reason:'必要的导入/归档说明'},
   targets:{user_id:'被设置目标的在用销售',quarter:'目标所属季度，如2026Q4'},

@@ -32,7 +32,7 @@ test('服务器配置固定回环监听、HTTPS回调及真实身份，拒绝不
 });
 
 test('服务器AI独立配置限制模型、凭据和Python运行位置，不把私有值写入错误消息',()=>{
-  const config={provider:'ppio',model:'qwen/qwen3.8-max',base_url:'https://api.ppio.com/openai/v1',apiKey:'isolated-private-key-for-test',python_executable:'/srv/qianfan-crm/runtime/intake-venv/bin/python3'};
-  const env=serverAIEnvironment(config);assert.equal(env.PPIO_API_KEY,config.apiKey);assert.equal(env.CRM_PYTHON,config.python_executable);
+  const config={provider:'zimaocloud',model:'deepseek-v4-1-flash',base_url:'https://aiclub.zimaocloud.com/model/openApi/v1',apiKey:'isolated-private-key-for-test',python_executable:'/srv/qianfan-crm/runtime/intake-venv/bin/python3'};
+  const env=serverAIEnvironment(config);assert.equal(env.AI_API_KEY,config.apiKey);assert.equal(env.CRM_PYTHON,config.python_executable);
   for(const patch of [{model:'other-model'},{base_url:'https://other.invalid'},{apiKey:'short'},{python_executable:'/usr/bin/python3'},{python_executable:'/srv/qianfan-crm/runtime/../../other/bin/python3'}])assert.throws(()=>serverAIEnvironment({...config,...patch}),error=>!error.message.includes(config.apiKey));
 });

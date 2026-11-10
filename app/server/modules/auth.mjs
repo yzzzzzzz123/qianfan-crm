@@ -34,7 +34,7 @@ export function createAuth(db, { demo = false, secure = false, basePath = '/' } 
       "SELECT * FROM users WHERE id=? AND active=1",
       s.user_id,
     );
-    return actor ? { actor, csrf: s.csrf, auth_method:s.auth_method } : null;
+    return actor ? { actor, csrf: s.csrf, auth_method:s.auth_method, sessionId:s.token, expires:s.expires } : null;
   }
   function createSession(user, {method=demo?'demo':'dingtalk',seconds=43200}={}) {
     const token = randomBytes(32).toString("hex");

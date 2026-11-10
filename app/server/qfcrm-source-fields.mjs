@@ -2,7 +2,7 @@ import {createHash} from 'node:crypto';
 
 export const QFCRM_SOURCE_FORMAT='qfcrm-three-table-v1';
 const signature=(rows,keys)=>createHash('sha256').update(JSON.stringify(rows.map(row=>keys.map(key=>row[key]??null)).sort((a,b)=>JSON.stringify(a).localeCompare(JSON.stringify(b))))).digest('hex');
-export const itemSignature=rows=>signature(rows,['name','kind','amount','margin']);
+export const itemSignature=rows=>signature(rows,['name','kind','amount','margin',...(rows.some(i=>(i.business_expense||0)>0)?['business_expense']:[])]);
 export const paymentSignature=rows=>signature(rows,['id','amount','status','pay_date','promise_date','product_amount']);
 const moneyKeys=['product_amount','product_margin','service_amount','service_margin','total_margin'];
 const validMoney=v=>v===null||Number.isSafeInteger(v)&&v>=0;

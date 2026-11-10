@@ -35,7 +35,7 @@ test('schema22 failure rolls back all added columns and existing data',()=>{
 });
 test('financial aggregates use complete actual items, preserve partial unknown margins, and hide PM margins',()=>{
  const c={id:1,amount:10000},items=[{contract_id:1,name:'产品',kind:'标品',amount:6000,margin:1200},{contract_id:1,name:'交付',kind:'交付',amount:4000,margin:800}];
- assert.deepEqual(contractFinancials(c,items),{product_names:['产品','交付'],product_types:['标品','交付'],financials_complete:true,product_amount:6000,service_amount:4000,product_margin:1200,service_margin:800,product_margin_rate:.2,total_margin:2000});
+ assert.deepEqual(contractFinancials(c,items),{product_names:['产品','交付'],product_types:['标品','交付'],financials_complete:true,product_amount:6000,service_amount:4000,product_margin:1200,service_margin:800,product_margin_rate:.2,total_margin:2000,business_expense:0,margin_before_expense:2000,total_margin_rate:.2});
  const unknown=contractFinancials(c,[items[0],{...items[1],margin:null}]);assert.equal(unknown.product_margin,1200);assert.equal(unknown.service_margin,null);assert.equal(unknown.total_margin,null);
  for(const input of [[],[items[0]],[...items,{contract_id:1,name:'多余',kind:'运维',amount:1,margin:0}],items.map(i=>({...i,kind:'未知分类'}))]){
   const result=contractFinancials(c,input);for(const key of ['product_amount','service_amount','product_margin','service_margin','total_margin','product_margin_rate'])assert.equal(result[key],null,key);
@@ -74,7 +74,8 @@ test('contract metadata and input margin rates are maintained without duplicate 
  assert.equal((await f.request(`/contracts/${id}`,{actor:f.actor,method:'PATCH',body:{project_status:'已验收未回款'}})).status,400);
  assert.equal((await f.request(`/contracts/${id}`,{actor:f.actor,method:'PATCH',body:{collaborator_pm:2}})).status,400);
  assert.equal(one(f.db,'SELECT count(*) n FROM users').n,usersBefore);
- const sales=await f.login(2);assert.equal((await f.request(`/contracts/${id}`,{actor:sales,method:'PATCH',body:{payment_type:'千帆收款'}})).status,403);
+ const sales=await f.login(2);assert.equal((await f.request(`/contracts/${id}`,{actor:sales,method:'PATCH',body:{payment_type:'千帆收款',reason:'销售核对付款主体'}})).status,200);
+ assert.equal((await f.request(`/contracts/${id}`,{actor:await f.login(3),method:'PATCH',body:{payment_type:'千帆收款',reason:'其他销售越权'}})).status,403);
  const pmActor=await f.login(pm.id);assert.equal((await f.request(`/contracts/${id}`,{actor:pmActor,method:'PATCH',body:{project_note:'PM更新进度',project_status:'运维中'}})).status,200);
  assert.equal((await f.request(`/contracts/${id}`,{actor:pmActor,method:'PATCH',body:{renewal_tag:'续费'}})).status,403);
  c=(await f.request('/state',{actor:pmActor})).body.contracts.find(c=>c.id===id);assert.equal(c.product_margin,null);assert.equal(c.service_margin,null);assert.equal(c.total_margin,null);assert.ok(c.items.every(i=>!Object.hasOwn(i,'margin')&&!Object.hasOwn(i,'rate')));
@@ -113,10 +114,11 @@ test('payment management reuses actual receipts, keeps plans separate, preserves
  c=await state();assert.equal(c.collected,3000);assert.equal(c.outstanding,7000);assert.equal(c.received_status,'部分回款');assert.equal(c.last_received_at,today());assert.equal(c.next_expected_at,dateAdd(3));
  const product=c.items.find(i=>i.kind==='标品');assert.equal((await f.request(`/items/${product.id}`,{actor:f.actor,method:'PATCH',body:{kind:'交付',reason:'会冲突已收产品款'}})).status,409);
  assert.equal((await f.request(`/payments/${first.body.id}`,{actor:f.actor,method:'PATCH',body:{promise_date:dateAdd(3),reason:'到账后改写'}})).status,409);
- assert.equal((await f.request(`/payments/${plan.body.id}/receive`,{actor:f.actor,method:'POST',body:{pay_date:today()}})).status,400);
+ assert.equal((await state()).payments.find(p=>p.id===plan.body.id).remaining_amount,7000);
  assert.equal((await f.request('/payments',{actor:f.actor,method:'POST',body:{contract_id:id,amount:70,product_amount:40,status:'已到账',pay_date:today()}})).status,200);
  c=await state();assert.equal(c.received_status,'是');assert.equal(c.collection_status,'已结清');assert.equal(c.outstanding,0);
- const sales=await f.login(2);assert.equal((await f.request(`/payments/${plan.body.id}`,{actor:sales,method:'PATCH',body:{note:'无权改',reason:'测试'}})).status,403);
+ const sales=await f.login(2);assert.equal((await f.request(`/payments/${plan.body.id}`,{actor:sales,method:'PATCH',body:{note:'销售核对计划',reason:'销售维护本人计划'}})).status,409);
+ assert.equal((await f.request(`/payments/${plan.body.id}`,{actor:await f.login(3),method:'PATCH',body:{note:'无权改',reason:'其他销售越权'}})).status,403);
 });
 
 test('legacy 未分类 and 实施 items allow unrelated maintenance without guessing classification or accepting newly assigned retired kinds',async t=>{

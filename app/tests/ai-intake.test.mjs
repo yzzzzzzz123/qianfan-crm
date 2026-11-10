@@ -124,15 +124,13 @@ test('真实模型省略不完整记录时仍显示缺失原因，未解决问�
   assert.equal(one(f.db,"SELECT COUNT(*) n FROM customers WHERE name='AI隔离新客户'").n,0);
 });
 
-test('AI提成结算复用真实试算并预览金额，只有管理员确认后才锁定结算',async t=>{
-  const provider=stub([]),f=await fixture(t,{aiProvider:provider}),actor=await f.login(1);
-  const state=(await f.request('/state',{actor})).body;
-  const p=state.commission.previews.find(p=>p.due>0);assert.ok(p);
-  provider.prepare=stub([operation('commission_confirm',{sales_id:p.sales_id,kind:p.kind,period:p.period})]).prepare;
-  const before=one(f.db,'SELECT count(*) n FROM commission_batches').n;
-  const r=await receive(f,actor),b=await batch(f,actor,r.body.id);assert.deepEqual(b.errors,[]);assert.deepEqual(b.operations[0].calculation,{base:p.base/100,rate:p.rate,due:p.due/100});
-  assert.equal(one(f.db,'SELECT count(*) n FROM commission_batches').n,before);assert.equal((await confirm(f,actor,b)).status,200);
-  assert.equal(one(f.db,'SELECT count(*) n FROM commission_batches').n,before+1);
+test('退役提成确认和发放类型不能经AI导入，历史记录保持原值',async t=>{
+ for(const type of ['commission_confirm','commission_pay']) {
+  const f=await fixture(t,{aiProvider:stub([operation(type,{sales_id:2,kind:'personal',period:quarter()})])}),actor=await f.login(1);
+  const before=all(f.db,'SELECT * FROM commission_batches');
+  const r=await receive(f,actor);assert.equal(r.status,400);assert.match(r.body.error,/不支持.*数据类型/);
+  assert.deepEqual(all(f.db,'SELECT * FROM commission_batches'),before);
+ }
 });
 
 test('退役骨架申请和审核类型均拒绝，不允许旧提案修改客户',async t=>{
@@ -159,20 +157,16 @@ test('AI接收仅生成草稿；跨客户商机合同回款整批确认后正确
   assert.deepEqual(all(f.db,'PRAGMA foreign_key_check'),[]);
 });
 
-test('上传合同附件不等于双方签章归档，未归档回款使整批回滚',async t=>{
-  const contractOp=operation('contract',{opportunity_id:'$opportunity1',name:'未归档合同',sign_date:today(),items:[{name:'授权',kind:'标品',amount:10000}]});
-  const attachment=operation('contract_attachment',{contract_id:'$contract1',source_file:'双方签章.pdf'},{source_file:'双方签章.pdf'});
-  const provider=stub([customer,opportunity,contractOp,attachment,operation('payment',{contract_id:'$contract1',amount:10000,status:'已到账',pay_date:today()})]);
-  const f=await fixture(t,{aiProvider:provider}),actor=await f.login(1),before={customers:one(f.db,'SELECT count(*) n FROM customers').n,contracts:one(f.db,'SELECT count(*) n FROM contracts').n,attachments:one(f.db,'SELECT count(*) n FROM attachments').n};
-  const response=await receive(f,actor,'资料只说明上传附件',{files:[signedFile()]}),draft=await batch(f,actor,response.body.id);
-  assert.ok(draft.errors.some(error=>/草稿尚未归档/.test(error.message)));assert.equal((await confirm(f,actor,draft)).status,422);
-  for(const [table,count] of Object.entries(before))assert.equal(one(f.db,`SELECT count(*) n FROM ${table}`).n,count);
-  provider.prepare=stub([customer,opportunity,contractOp,attachment]).prepare;
-  const valid=await receive(f,actor,'只保存草稿和附件',{files:[signedFile()]}),preview=await batch(f,actor,valid.body.id);
-  assert.deepEqual(preview.errors,[]);assert.equal((await confirm(f,actor,preview)).status,200);
-  const c=one(f.db,"SELECT * FROM contracts WHERE name='未归档合同'");assert.equal(c.lifecycle,'草稿');assert.equal(c.archive_attachment_id,null);
-  assert.equal(one(f.db,'SELECT stage FROM opportunities WHERE id=?',c.opportunity_id).stage,'需求');
-  assert.equal(one(f.db,'SELECT count(*) n FROM payments WHERE contract_id=?',c.id).n,0);
+test('AI新增合同即签署，附件独立保存，已签署合同可同批登记回款',async t=>{
+ const contractOp=operation('contract',{opportunity_id:'$opportunity1',name:'无签章归档合同',sign_date:today(),items:[{name:'授权',kind:'标品',amount:10000}]});
+ const attachment=operation('contract_attachment',{contract_id:'$contract1',source_file:'双方签章.pdf'},{source_file:'双方签章.pdf'});
+ const f=await fixture(t,{aiProvider:stub([customer,opportunity,contractOp,attachment,operation('payment',{contract_id:'$contract1',amount:10000,status:'已到账',pay_date:today()})])}),actor=await f.login(1);
+ const response=await receive(f,actor,'保存已签署合同和独立附件',{files:[signedFile()]}),draft=await batch(f,actor,response.body.id);
+ assert.deepEqual(draft.errors,[]);assert.equal((await confirm(f,actor,draft)).status,200);
+ const c=one(f.db,"SELECT * FROM contracts WHERE name='无签章归档合同'");assert.equal(c.lifecycle,'已归档');assert.equal(c.archive_attachment_id,null);assert.equal(c.archived_at,null);
+ assert.equal(one(f.db,'SELECT stage FROM opportunities WHERE id=?',c.opportunity_id).stage,'赢单');
+ assert.equal(one(f.db,'SELECT count(*) n FROM payments WHERE contract_id=?',c.id).n,1);
+ assert.equal(one(f.db,"SELECT count(*) n FROM attachments WHERE entity='contract' AND entity_id=?",c.id).n,1);
 });
 
 test('导入回执精确定位真实记录、原文件及时间，更新不改写旧回执且SQL视图可追溯',async t=>{
@@ -276,7 +270,7 @@ test('上传体积、类型、编码、密钥保护与未配置模型正确失�
   for(const b of [{files:[{name:'脚本.exe',base64:'YQ=='}]},{files:[{name:'a.md',base64:'%$'}]},{text:'sk_'+ 'a'.repeat(32)},{files:[]}])assert.throws(()=>validateUpload(b));
   const ai=createIntakeAI({env:{}});await assert.rejects(()=>ai.prepare({text:'资料'},{}),/尚未配置/);
   for(const value of [{choices:[{finish_reason:'length',message:{content:'{}'}}]},{choices:[{finish_reason:'stop',message:{content:'not json'}}]}]) {
-    const provider=createIntakeAI({env:{PPIO_API_KEY:'isolated-test-key'},fetcher:async()=>({ok:true,json:async()=>value})});
+    const provider=createIntakeAI({env:{AI_API_KEY:'isolated-test-key'},fetcher:async()=>({ok:true,json:async()=>value})});
     await assert.rejects(()=>provider.prepare({text:'资料'},{today:today(),actor:{},records:{}}),/未完成|有效结构化/);
   }
 });

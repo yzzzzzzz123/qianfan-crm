@@ -20,7 +20,7 @@ test('真实流程：草稿不计签约、不赢单、不收款；双方盖章�
   const before=(await f.request('/state',{actor})).body;
   const draft=await f.request('/contracts',{actor,method:'POST',body:contract(1)});
   assert.equal(draft.status,200,JSON.stringify(draft.body));
-  const id=draft.body.id;
+  const id=draft.body.id;run(f.db,"UPDATE contracts SET lifecycle='草稿' WHERE id=?",id);run(f.db,"UPDATE opportunities SET stage='商务' WHERE id=1");
   let state=(await f.request('/state',{actor})).body;
   assert.equal(state.contracts.find(c=>c.id===id).lifecycle,'草稿');
   assert.equal(state.opportunities.find(o=>o.id===1).stage,'商务');
@@ -176,7 +176,7 @@ for(const lockedBy of ['提成','绩效'])test(`已有${lockedBy}证据阻止商
     run(f.db,"INSERT INTO performance_reviews(user_id,month,status,snapshot,reviewed_by,updated_at) VALUES(2,'2026-01','confirmed',?,1,?)",JSON.stringify({evidence:{contracts:[{id:lockedId}]}}),now());
   }
   const before={opportunity:one(f.db,'SELECT owner_id,stage FROM opportunities WHERE id=1'),audit:one(f.db,'SELECT COUNT(*) n FROM audit').n,history:one(f.db,'SELECT COUNT(*) n FROM stage_history').n,revision:one(f.db,'SELECT revision FROM workspace_revision').revision};
-  const response=await f.request('/opportunities/1',{actor,method:'PATCH',body:{owner_id:3,stage:'需求',reason:'必须整笔交接'}});
+  const response=await f.request('/opportunities/1',{actor,method:'PATCH',body:{owner_id:3,reason:'必须整笔交接'}});
   assert.equal(response.status,409,JSON.stringify(response.body));assert.match(response.body.error,new RegExp(lockedBy));
   assert.deepEqual(one(f.db,'SELECT owner_id,stage FROM opportunities WHERE id=1'),before.opportunity);
   for(const contractId of [first.body.id,lockedId])assert.equal(one(f.db,'SELECT owner_id FROM contracts WHERE id=?',contractId).owner_id,2);

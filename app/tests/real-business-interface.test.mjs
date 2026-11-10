@@ -32,12 +32,12 @@ test('合同草稿先选已有签章附件确认归档，整体收款与单笔�
   const c={...S.contracts[0],lifecycle:'草稿',collection_status:'部分回款',attachments:[{id:991,filename:'双方签章.pdf',mime_type:'application/pdf',size:1000,created_at:S.today}],items:[{...S.contracts[0].items[0],margin:null}]},state={...S,contracts:[c]};
   const html=contractDetail(state,c.id);
   assert.equal((html.match(/data-action="archive-contract"/g)||[]).length,1);
-  assert.doesNotMatch(html,/data-action="new-payment"/);assert.match(html,/整体收款/);assert.match(html,/部分回款/);assert.match(html,/毛利 待补充/);
+  assert.doesNotMatch(html,/data-action="new-payment"/);assert.match(html,/未收金额/);assert.match(html,/部分回款/);assert.match(html,/待核对/);
   const archive=formContent(state,'archive-contract',c.id);
-  assert.match(archive,/name="archive_attachment_id" required/);assert.match(archive,/name="both_stamped" required/);assert.doesNotMatch(archive,/type="file"/);
+  assert.match(archive,/name="archive_attachment_id"/);assert.match(archive,/name="both_stamped" required/);assert.match(archive,/type="file"/);
   assert.doesNotMatch(contractDetail({...state,contracts:[{...c,lifecycle:'已归档'}]},c.id),/data-action="archive-contract"/);
-  assert.match(formContent({...state,contracts:[{...c,attachments:[]}]},'archive-contract',c.id),/请先上传签章件/);
-  assert.match(formContent(S,'contract',''),/保存草稿/);assert.doesNotMatch(formContent(S,'contract',''),/保存后商机变为成交|name="source"|name="nature"/);
+  assert.doesNotMatch(formContent({...state,contracts:[{...c,attachments:[]}]},'archive-contract',c.id),/type="file"[^>]*required/);
+  assert.match(formContent(S,'contract',''),/保存合同/);assert.doesNotMatch(formContent(S,'contract',''),/保存后商机变为成交|name="source"|name="nature"/);
 });
 test('报价使用数量原价折扣明细，历史资料独立入口保持退役',async t=>{
   const f=await fixture(t),actor=await f.login(1),S=(await f.request('/state',{actor})).body;

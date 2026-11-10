@@ -1,6 +1,12 @@
+import {createPresence} from './modules/presence.mjs';
+import {canManageContractData,assertContractDataAccess,isContractCorrectionRoute} from './contract-access.mjs';
+import {handleContractExpenses,readContractExpenses} from './modules/contract-expenses.mjs';
+import {handleDataReview,readDataReview} from './modules/data-review.mjs';
+import {readSettlementReview} from './modules/settlement-review.mjs';
+import {handleAdminRecords,readRecycle,readUnifiedRecycle,previewRecycle} from './modules/admin-records.mjs';
 import { createHash, randomUUID } from "node:crypto";
 import { one, run, transaction } from "./database.mjs";
-import { AppError, assert, now } from "./domain.mjs";
+import { AppError, assert, now, text } from "./domain.mjs";
 import { createAuth, publicUser } from "./modules/auth.mjs";
 import { buildState } from "./modules/reporting-prd.mjs";
 import { handleCustomers } from "./modules/customers.mjs";
@@ -24,6 +30,7 @@ import {createCompanyProfileQueue} from './company-profile-queue.mjs';
 import {createCompanyProfileWorker} from './company-profile-worker.mjs';
 import {createSalesAdviceAI,salesAdviceSnapshot,salesAdviceResponse} from './sales-advice.mjs';
 import {createContractAnalysis} from './contract-analysis.mjs';
+import {readContractHistory} from './modules/contract-history.mjs';
 
 const sha = (s) => createHash("sha256").update(s).digest("hex");
 export function createService(
@@ -31,6 +38,7 @@ export function createService(
   { demo = false, secure = false, publicOrigin = "", identityProvider, aiProvider, salesAdviceProvider, companyProfileProvider, companyProfileLocalAutomation, minutesOptions={}, deployment='local', localIdentitySwitch = false, developerIdentitySwitch = localIdentitySwitch, basePath = '/' } = {},
 ) {
   const auth = createAuth(db, { demo, secure, basePath });
+  const presence = createPresence(db);
   const ding = identityProvider || createDingTalk({secure,basePath});
   const ai = aiProvider || createIntakeAI();
   const salesAI=salesAdviceProvider||createSalesAdviceAI({env:demo?{}:process.env});
@@ -76,7 +84,7 @@ export function createService(
     const r = one(db, `SELECT * FROM ${table} WHERE id=?`, Number(id));
     assert(r, "记录不存在", 404);
     assert(table!=='opportunities'||!r.archived_at,'该历史商机已退出当前业务列表',410);
-    assert(table!=='contracts'||!r.retired_at,'该历史合同已退出当前业务列表',410);
+    assert(table!=='contracts'||!r.retired_at||access==='history'&&canManageContractData(actor),'该历史合同已退出当前业务列表',410);
     assert(
       actor.role === "admin" || (actor.role === "sales" && r.owner_id === actor.id) ||
       (access === "follow" && (r.collaborator_pm === actor.id || one(db,"SELECT 1 FROM customer_collaborators WHERE customer_id=? AND user_id=?",table === "customers" ? r.id : r.customer_id,actor.id))),
@@ -107,10 +115,13 @@ export function createService(
     value.customers=value.customers.map(c=>({...c,...(!c.shared?{company_profile:{...companyProfiles.read(c),job:profileQueue.read(c.id)}}:{})}));
     value.company_profiles=actor.role==='admin'?queueSummary():{configured:!!companyProvider.configured,automatic:profileWorker.automatic};
     value.contracts=value.contracts.map(c=>({...c,...(actor.role!=='pm'?{contract_analysis:contractAnalysis.describe(c.id,actor)}:{})}));
-    value.ai.salesAdvice={configured:!!salesAI.configured,model:salesAI.model||'qwen/qwen3.8-max'};
+    value.ai.salesAdvice={configured:!!salesAI.configured,model:salesAI.model||'deepseek-v4-1-flash'};
     return value;
   };
   const handlers = [
+    handleDataReview,
+    handleContractExpenses,
+    handleAdminRecords,
     handleCustomers,
     handleOpportunities,
     handleActivities,
@@ -127,6 +138,7 @@ export function createService(
     if(path==='/api/minutes/personal/import'&&method==='POST')return minutes.mutate(actor,'personal-import',null,b,minutesPrepared);
     const minutesRoute=path.match(/^\/api\/minutes\/(start|authorizations\/([a-f0-9-]{36})\/(confirm|cancel|retry)|sources\/([a-f0-9-]{36})\/(disconnect)|records\/(\d+)\/(association|refresh|speaker-insights|quality|transcript))$/);
     if(minutesRoute&&method==='POST')return minutes.mutate(actor,minutesRoute[1]==='start'?'start':minutesRoute[3]||minutesRoute[5]||minutesRoute[7],minutesRoute[2]||minutesRoute[4]||minutesRoute[6],b,minutesPrepared);
+    if(b.data_correction!==undefined){if(actor.role!=='admin'){assertContractDataAccess(actor);assert(isContractCorrectionRoute(path),'当前角色不能修正此类资料',403);}assert(b.data_correction===true,'修正标志无效');text(b.reason,'资料修正原因',1000);}
     const context = {
       path,
       method,
@@ -154,7 +166,7 @@ export function createService(
     assert(!path.startsWith('/api/integrations/ppl'),'PPL在线同步已停用，客户和商机由CRM维护',410);
     assert(!path.startsWith('/api/capture/')&&!path.startsWith('/api/change-requests'),'此旧资料入口已停用，请使用AI接收或业务页面表单',410);
     if (path === "/api/health")
-      return { body: { ok: true, version: "2.1.0", demo, schemaVersion:one(db,'SELECT MAX(version) version FROM schema_version').version, ai:{configured:!!ai.configured,model:ai.model},companyProfile:{configured:!!companyProvider.configured,automatic:profileWorker.automatic,provider:companyProvider.provider||'',fallback:companyProvider.fallbackConfigured?'qwen':null} } };
+      return { body: { ok: true, version: "2.1.0", demo, schemaVersion:one(db,'SELECT MAX(version) version FROM schema_version').version, ai:{configured:!!ai.configured,model:ai.model},companyProfile:{configured:!!companyProvider.configured,automatic:profileWorker.automatic,provider:companyProvider.provider||'',fallback:companyProvider.fallbackConfigured?'deepseek':null} } };
     if (path === "/api/auth/options" && method === "GET") {const result=auth.options();result.body.dingtalk=ding.loginConfigured;return result;}
     if(path==='/api/auth/dingtalk/start'&&method==='GET')return ding.start();
     if (method !== "GET") {
@@ -212,6 +224,10 @@ export function createService(
       if(minuteRecord){if(minuteRecord[2])return {audio:await minutes.audio(actor,Number(minuteRecord[1]),context,req.headers.range,()=>recheck())};return {body:minutes.detail(actor,Number(minuteRecord[1]),context)};}
       if (path === "/api/auth/me")
         return { body: { actor: publicUser(operator), csrf: s.csrf, demo,developer:canSwitch } };
+      if(path==='/api/developer/presence') {
+        developerAssert(canSwitch,'仅开发人员可查看在线状态',403,'DEVELOPER_FORBIDDEN');
+        return {body:presence.read()};
+      }
       if(path==='/api/developer/identities') {
         developerAssert(canSwitch,'当前登录者无权切换身份',403,'DEVELOPER_FORBIDDEN');
         return {body:allUsers()};
@@ -222,6 +238,15 @@ export function createService(
         value.developer=canSwitch?{operator:publicUser(operator),impersonating:actor.id!==operator.id,users:allUsers()}:null;
         return { body:value };
       }
+      const recycle=path.match(/^\/api\/contracts\/(\d+)\/recycle$/);if(recycle)return {body:readRecycle({db},actor,recycle[1])};
+      if(path==='/api/data-review')return {body:readDataReview({db},actor,params)};
+      if(path==='/api/settlement-review')return {body:readSettlementReview({db,getRules},actor,params)};
+      if(path==='/api/records/recycle')return {body:readUnifiedRecycle({db},actor,params)};
+      if(path==='/api/records/recycle/preview')return {body:previewRecycle({db},actor,params)};
+      const expenseRead=path.match(/^\/api\/contracts\/(\d+)\/expenses$/);if(expenseRead)return {body:readContractExpenses({db,scoped},actor,Number(expenseRead[1]))};
+      if(path==='/api/contracts/history')return {body:readContractHistory({db,scoped},actor)};
+      const contractHistory=path.match(/^\/api\/contracts\/(\d+)\/history$/);
+      if(contractHistory)return {body:readContractHistory({db,scoped},actor,Number(contractHistory[1]))};
       const document = renderDocument({db,scoped}, path, actor);
       if (document) return {body:document};
       if(path==='/api/source-records')return {body:readSources({db,scoped},new URL(req.url||path,'http://localhost').searchParams,actor)};
@@ -233,6 +258,10 @@ export function createService(
       if(file) {const row=one(db,'SELECT * FROM ai_uploads WHERE id=?',Number(file[1]));assert(row,'附件不存在',404);readBatch(db,row.batch_id,actor);return {body:{filename:row.filename,base64:Buffer.from(row.content).toString('base64')}};}
       throw new AppError("接口不存在", 404);
     }
+    if(path==='/api/auth/presence'&&method==='POST') {
+      assert(req.headers['x-csrf-token']===s.csrf,'会话校验失败，请刷新页面后重试',403);
+      return {body:presence.touch(s,b)};
+    }
     if(actor.id!==operator.id) {
       audit(operator,'developer.test_request','user',actor.id,{operator_user_id:operator.id,acting_as_user_id:actor.id,target:publicUser(actor),method,path,stage:'attempt'});
     }
@@ -241,7 +270,7 @@ export function createService(
       "会话校验失败，请刷新页面后重试",
       403,
     );
-    if (path === "/api/auth/logout") return auth.logout(req);
+    if (path === "/api/auth/logout") {presence.leave(s.sessionId);return auth.logout(req);}
     assert(["POST", "PATCH", "DELETE"].includes(method), "请求方法不支持", 405);
     const key = req.headers["idempotency-key"];
     assert(
@@ -270,7 +299,7 @@ export function createService(
       if(cached){assert(cached.hash===hash,'操作编号冲突',409);assert(cached.fingerprint===snapshot.fingerprint,'商机或跟进资料已变化，请重新点击分析',409);return {body:cached.body};}
       const pendingKey=actor.id+':'+id;
       assert(!pendingAdvice.has(pendingKey)&&pendingAdvice.size<2,'AI正在分析，请稍后重试',429);
-      assert(salesAI.configured,'派欧云Qwen尚未配置，请联系管理员配置AI凭据',503);
+      assert(salesAI.configured,'紫猫云 DeepSeek尚未配置，请联系管理员配置AI凭据',503);
       pendingAdvice.add(pendingKey);
       try{
         let advice;
@@ -309,7 +338,7 @@ export function createService(
     }
     const extractionRoute=path.match(/^\/api\/contracts\/(\d+)\/extract-attachment$/);
     if(extractionRoute&&method==='POST'){
-      recheck();admin(actor);const id=Number(extractionRoute[1]);scoped('contracts',id,actor);
+      recheck();assertContractDataAccess(actor);const id=Number(extractionRoute[1]);scoped('contracts',id,actor);
       assert(Object.keys(b).length===1&&Number.isSafeInteger(b.attachment_id)&&b.attachment_id>0,'请选择该合同的一个原附件');
       assert(one(db,"SELECT id FROM attachments WHERE id=? AND entity='contract' AND entity_id=?",b.attachment_id,id),'请选择本合同的原附件',404);
       const existing=one(db,'SELECT * FROM mutations WHERE key=?',unique);
@@ -363,7 +392,11 @@ export function createService(
         const currentSession=auth.session(req);
         assert(currentSession && currentSession.actor.id===operator.id && currentSession.csrf===s.csrf,'登录状态已失效，请重新登录后重试',401);
         assert(['role','business_member','developer_admin'].every(key=>currentSession.actor[key]===operator[key]),'账号权限已变化，请刷新后重试',403);
-        if(actor.id!==operator.id) {
+        if(path==='/api/auth/presence'&&method==='POST') {
+      assert(req.headers['x-csrf-token']===s.csrf,'会话校验失败，请刷新页面后重试',403);
+      return {body:presence.touch(s,b)};
+    }
+    if(actor.id!==operator.id) {
           const currentActor=businessUser(actor.id);
           assert(developerIdentitySwitch && currentSession.auth_method==='dingtalk' && currentSession.actor.developer_admin===1 && one(db,'SELECT 1 FROM ding_identities WHERE user_id=?',operator.id),'当前登录者无权切换身份',403);
           assert(currentActor && currentActor.role===actor.role,'所选成员的状态或权限已变化，请重新选择',403);

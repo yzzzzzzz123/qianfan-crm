@@ -1,10 +1,11 @@
+import {canManageContractData,assertContractDataAccess} from '../contract-access.mjs';
 import { createHash } from 'node:crypto';
 import { all, one } from '../database.mjs';
 import { assert, now } from '../domain.mjs';
 
 const tables={customer:'customers',opportunity:'opportunities',contract:'contracts'};
 export function sourceAccess(ctx,entity,id,actor) {
-  if(tables[entity])return ctx.scoped(tables[entity],id,actor,entity==='opportunity'?'follow':'edit');
+  if(tables[entity])return ctx.scoped(tables[entity],id,actor,entity==='opportunity'?'follow':entity==='contract'&&canManageContractData(actor)?'history':'edit');
   const related={contact:['contacts','customer_id','customers'],activity:['activities','opportunity_id','opportunities'],quote:['quotes','opportunity_id','opportunities'],payment:['payments','contract_id','contracts']};
   const def=related[entity];assert(def,'资料对象无效');
   const record=one(ctx.db,`SELECT * FROM ${def[0]} WHERE id=?`,id);assert(record,'记录不存在',404);
@@ -29,8 +30,7 @@ export function readAttachment(ctx,id,actor) {
   return {filename:row.filename,mime_type:row.mime_type,base64:Buffer.from(row.content).toString('base64')};
 }
 export function attachContractFile(ctx,contractId,file) {
-  assert(ctx.actor.role==='admin','合同附件须由管理员维护',403);
-  ctx.scoped('contracts',contractId,ctx.actor);
+  assertContractDataAccess(ctx.actor,ctx.scoped('contracts',contractId,ctx.actor));
   const filename=file.name||file.filename;
   assert(typeof filename==='string'&&filename.length<=255&&!/[\\/\x00-\x1f]/.test(filename),'附件名无效');
   const content=file.content?Buffer.from(file.content):Buffer.from(file.base64||'','base64');
@@ -39,6 +39,9 @@ export function attachContractFile(ctx,contractId,file) {
   const types={pdf:'application/pdf',png:'image/png',jpg:'image/jpeg',jpeg:'image/jpeg',webp:'image/webp',docx:'application/vnd.openxmlformats-officedocument.wordprocessingml.document',xlsx:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',txt:'text/plain',md:'text/markdown'};
   assert(types[ext],'合同附件格式不支持');
   if(ext==='pdf')assert(content.subarray(0,5).toString()==='%PDF-','PDF附件内容与文件类型不符');
+  if(ext==='png')assert(content.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10])),'PNG附件内容与文件类型不符');
+  if(['jpg','jpeg'].includes(ext))assert(content[0]===255&&content[1]===216&&content[2]===255,'JPEG附件内容与文件类型不符');
+  if(ext==='webp')assert(content.subarray(0,4).toString()==='RIFF'&&content.subarray(8,12).toString()==='WEBP','WebP附件内容与文件类型不符');
   const sha256=createHash('sha256').update(content).digest('hex');
   const existing=one(ctx.db,"SELECT id FROM attachments WHERE entity='contract' AND entity_id=? AND sha256=?",contractId,sha256);
   if(existing)return existing.id;

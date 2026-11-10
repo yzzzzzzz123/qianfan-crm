@@ -17,7 +17,7 @@ export function formPayments(S, type, id, options) {
         ) +
         select("status", "回款状态", ["已到账", "待到账", "逾期"]) +
         input("pay_date", "到账日期", S.today, "date", false) +
-        input("promise_date", "承诺付款日", "", "date", false) +
+        input("promise_date", "预计收款日", "", "date", false) +
         textarea("note", "回款说明"),
       type,
       id,

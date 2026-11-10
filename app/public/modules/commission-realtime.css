@@ -1,0 +1,140 @@
+.commission-live .metrics{grid-template-columns:repeat(4,minmax(0,1fr))}
+.commission-live .metric-value{font-size:27px;overflow-wrap:anywhere}
+.commission-live .commission-filters{justify-content:flex-start;align-items:flex-end;gap:12px;flex-wrap:wrap}
+.commission-live .commission-filters>#filter-owner,.commission-live .commission-filters>.search-select{margin-left:auto;min-width:150px}
+.commission-card-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px;padding:20px 24px 24px}
+.commission-card-list:has(>.commission-person-card:only-child){grid-template-columns:minmax(0,1fr)}
+.commission-person-card{min-width:0;border:1px solid var(--line-strong);border-radius:10px;background:var(--sheet);overflow:hidden}
+.commission-person-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;padding:20px 20px 16px}
+.commission-person-head h3{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin:0;font-size:16px}
+.commission-person-head p{margin:6px 0 0;font-size:12px;color:var(--secondary)}
+.commission-current-amount{text-align:right;flex-shrink:0}
+.commission-current-amount>span{display:block;font-size:11px;color:var(--secondary);margin-bottom:3px}
+.commission-current-amount>strong{display:block;color:var(--sail-deep);font-size:25px;font-weight:650;line-height:1.4;font-variant-numeric:tabular-nums}
+.commission-current-amount>strong.is-pending{font-size:18px;color:var(--orange)}
+.commission-components{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:0 20px 16px}
+.commission-components:has(>.commission-component:only-child){grid-template-columns:minmax(0,1fr)}
+.commission-component{padding:12px 14px;min-width:0;border-radius:7px;background:var(--control)}
+.commission-component>span{display:block;font-size:12px;color:var(--secondary)}
+.commission-component>b{display:block;margin:4px 0;font-size:18px;line-height:1.5;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.commission-component>small{display:block;font-size:11px;color:var(--muted);line-height:1.8}
+.commission-person-summary{padding:0 20px 16px;display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap;font-size:11px;color:var(--muted)}
+.commission-person-summary>span{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+.commission-person-issues{margin:0 20px 16px;padding:11px 13px;border:1px solid #ecdcc3;border-radius:7px;background:#fffaf1;color:var(--orange)}
+.commission-person-issues>summary{cursor:pointer;font-weight:600;font-size:12px}
+.commission-issue-row{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;padding:8px 0;font-size:12px;line-height:1.8;overflow-wrap:anywhere}
+.commission-issue-row+.commission-issue-row{border-top:1px solid #efe5d6}
+.commission-issue-row>div{min-width:0}
+.commission-issue-row .btn{height:auto;min-height:0;padding:0 0 3px;white-space:normal;text-align:left;color:var(--sail);font-size:12px;display:block}
+.commission-issue-row .text-link{flex-shrink:0;font-size:12px}
+.commission-calculation{border-top:1px solid var(--line)}
+.commission-calculation>summary{padding:13px 20px;font-size:12px;color:var(--sail);font-weight:500;cursor:pointer}
+.commission-detail-body{padding:0 20px 16px;font-size:12px;color:var(--secondary);overflow-wrap:anywhere}
+.commission-detail-body p{margin:12px 0;line-height:1.8}
+.commission-calculation-line{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:11px 0;border-bottom:1px solid var(--line);font-size:12px;line-height:1.7}
+.commission-calculation-line>div{min-width:0;flex:1}
+.commission-calculation-line .btn{padding:0;height:auto;min-height:0;white-space:normal;text-align:left;color:var(--sail);font-size:12px}
+.commission-calculation-line small{display:block;color:var(--muted);font-size:11px}
+.commission-calculation-line>b{text-align:right;max-width:40%;font-variant-numeric:tabular-nums;color:var(--ink)}
+.commission-calculation-line>b small{font-weight:400;color:var(--orange)}
+.commission-scenarios{margin-top:13px;line-height:1.8}
+.commission-scenarios summary{cursor:pointer;color:var(--sail)}
+.commission-history-note{font-size:11px;color:var(--muted)}
+.commission-period-note{margin:14px 24px 0;padding:12px 15px;border-radius:6px;background:var(--sail-soft);color:var(--secondary);font-size:12px;line-height:1.8}
+.commission-empty{grid-column:1/-1;padding:12px 0;color:var(--muted);font-size:13px}
+.commission-history>details,.commission-rules>details,.commission-receipt-section>details{padding:18px 24px}
+.commission-history>details>summary,.commission-rules>details>summary,.commission-receipt-section>details>summary{color:var(--sail);cursor:pointer;font-weight:600;font-size:13px}
+.commission-history>details>p{margin:14px 0;font-size:12px}
+.commission-history-entry{border-top:1px solid var(--line);margin-top:12px;padding-top:12px}
+.commission-history-entry>summary{display:flex;align-items:center;gap:12px;flex-wrap:wrap;cursor:pointer;font-size:12px;color:var(--secondary)}
+.commission-history-entry>summary>strong{margin-left:auto;color:var(--ink);font-size:14px}
+.commission-history-entry>summary>small{font-size:11px;color:var(--muted)}
+.commission-history-entry .commission-detail-body{padding:0}
+.commission-rules .section-head{padding-left:0;padding-right:0;flex-wrap:wrap}
+.commission-rules .panel-copy{padding:16px 0}
+.commission-receipt-section .panel{margin:14px -24px -18px;border-bottom:0;border-left:0;border-right:0;border-radius:0}
+.commission-receipt-section .section-head{padding:16px 24px}
+@media(max-width:1100px){.commission-card-list{grid-template-columns:minmax(0,1fr)}.commission-live .metric-value{font-size:24px}}
+@media(max-width:700px){.commission-live .metrics{grid-template-columns:repeat(2,minmax(0,1fr));padding:12px 0}.commission-live .metric{padding:12px 16px}.commission-live .metric:nth-child(2){border-right:0}.commission-live .metric-value{font-size:23px}.commission-card-list{padding:16px;gap:15px}.commission-person-head{padding:16px;gap:10px}.commission-person-head h3{font-size:15px}.commission-person-head p{font-size:11px}.commission-current-amount>strong{font-size:22px}.commission-current-amount>strong.is-pending{font-size:16px}.commission-components{margin:0 16px 14px;gap:9px}.commission-component{padding:10px}.commission-component>b{font-size:17px}.commission-person-summary{padding:0 16px 14px}.commission-person-issues{margin:0 16px 14px}.commission-calculation>summary{padding:13px 16px}.commission-detail-body{padding:0 16px 14px}.commission-live .commission-filters{padding:14px 16px}.commission-live .commission-filters>.search-select,.commission-live .commission-filters>#filter-owner{margin-left:0;min-width:0;flex:1 1 150px}.commission-history>details,.commission-rules>details,.commission-receipt-section>details{padding:16px}.commission-period-note{margin:14px 16px 0}.commission-receipt-section .panel{margin:14px -16px -16px}.commission-history-entry>summary{gap:6px 10px}.commission-history-entry>summary>small{width:100%}}
+@media(prefers-reduced-motion:reduce){.commission-live *{scroll-behavior:auto}}
+
+.commission-person-issues.is-notice{border-color:var(--line-strong);background:var(--control);color:var(--secondary)}
+.commission-person-issues.is-notice .commission-issue-row+.commission-issue-row{border-color:var(--line)}
+.commission-update-status{margin:-5px 24px 10px;color:var(--muted);font-size:11px}
+@media(max-width:700px){.commission-update-status{margin-left:16px;margin-right:16px}}
+
+.commission-toolbar .section-head{padding-bottom:12px}
+.commission-toolbar .commission-filters{padding-bottom:13px;border-bottom:0}
+.commission-toolbar .commission-filters>.btn{margin-left:auto}
+.commission-period-steps{display:flex;gap:6px;flex-wrap:wrap}
+.commission-period-steps .btn{padding-left:10px;padding-right:10px}
+.commission-view-filters{padding-top:0;padding-bottom:14px;gap:12px;align-items:flex-end;flex-wrap:wrap}
+.commission-view-filters>label{display:flex;flex-direction:column;align-items:flex-start;gap:7px}
+.commission-view-filters>label select{width:160px;height:34px;border:1px solid var(--line-strong);border-radius:5px;padding:0 10px;background:var(--sheet);font:inherit;color:var(--ink)}
+.commission-view-filters>.commission-search-label{flex:1;min-width:180px;max-width:400px}
+.commission-view-filters .commission-search-label input{width:100%;max-width:none;height:34px;border:1px solid var(--line-strong);border-radius:5px;padding:0 10px;background:var(--sheet);font-size:12px}
+.commission-view-filters>#filter-owner,.commission-view-filters>.search-select{margin-left:auto;min-width:150px}
+.commission-filter-scope{margin:0;padding:0 24px 18px;color:var(--muted);font-size:11px;line-height:1.7}
+.commission-period-note{line-height:1.8}
+.commission-queue .section-head{padding-bottom:12px}
+.commission-queue .section-head h2{display:flex;gap:8px;align-items:center}
+.commission-count{font-size:12px;color:var(--orange);background:#fff1db;padding:1px 7px;line-height:1.7;border-radius:20px;font-weight:500}
+.commission-task-list{padding:0 24px}
+.commission-task{display:flex;align-items:center;justify-content:space-between;gap:22px;padding:16px 0;border-top:1px solid var(--line)}
+.commission-task-main{min-width:0;flex:1}
+.commission-task-heading{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+.commission-task-heading>strong{font-size:13px}
+.commission-task-heading>span:not(.badge){color:var(--muted);font-size:11px}
+.commission-task-main>p{margin:9px 0 6px;font-size:12px;color:var(--secondary);line-height:1.8;overflow-wrap:anywhere}
+.commission-task-main>small{font-size:11px;color:var(--muted)}
+.commission-queue-heading{display:flex;gap:8px;align-items:center;padding:16px 24px 10px;border-top:1px solid var(--line);font-size:13px;font-weight:600}
+.commission-task-main>.commission-task-impact{color:var(--orange);margin-top:4px}
+.commission-task-heading>strong{overflow-wrap:anywhere}
+.commission-queue-more>.commission-task-list{padding:8px 0 0;color:var(--ink)}
+.commission-task-contracts{display:flex;flex-wrap:wrap;gap:6px 14px;margin:4px 0}
+.commission-task-contracts .btn{font-size:12px;min-height:0;height:auto;white-space:normal;text-align:left;color:var(--sail);padding:0}
+.commission-task-action{flex-shrink:0;max-width:40%;font-size:12px;color:var(--muted)}
+.commission-task-action .btn{font-size:12px;white-space:normal}
+.commission-task-extra{display:none}
+.commission-queue:has(>.commission-queue-more[open]) .commission-task-extra{display:flex}
+.commission-queue-more{padding:12px 24px 17px;font-size:12px;color:var(--sail)}
+.commission-queue-more>summary{cursor:pointer;font-weight:500}
+.commission-queue.is-clear{display:flex;justify-content:space-between;align-items:center;padding:18px 24px;gap:15px;background:linear-gradient(105deg,var(--sheet),#f8fcfa)}
+.commission-queue.is-clear h2{font-size:14px;margin:0 0 5px}
+.commission-queue.is-clear p{margin:0;font-size:12px;color:var(--muted)}
+.commission-inline-note{font-size:10px;margin-left:6px;color:var(--orange)}
+.commission-tier-note{margin:0 20px 16px;padding:11px 13px;border:1px solid var(--line);border-radius:7px;background:#fafcff;line-height:1.8}
+.commission-tier-note>strong{font-size:11px;color:var(--ink)}
+.commission-tier-note>p{font-size:11px;margin:5px 0 0;color:var(--secondary)}
+.commission-tier-note b{font-weight:600;color:var(--sail-deep)}
+.commission-amount-breakdown{font-size:11px;color:var(--secondary);padding:0 20px;margin:-3px 0 14px;line-height:1.8}
+.commission-person-issues{font-size:12px}
+.commission-person-issues>summary{line-height:1.7}
+.commission-contract-name{font-size:12px;line-height:1.7;overflow-wrap:anywhere}
+.commission-history-filter{display:flex;align-items:flex-end;gap:14px;flex-wrap:wrap;padding:3px 0 14px}
+.commission-history-filter>label{font-size:12px;color:var(--secondary);display:flex;flex-direction:column;gap:7px}
+.commission-history-filter select{height:34px;width:200px;max-width:100%;font:inherit;padding:0 10px;border:1px solid var(--line-strong);border-radius:5px;background:var(--sheet);color:var(--ink)}
+.commission-history-filter>span{font-size:11px;color:var(--muted);padding-bottom:6px}
+.commission-live .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+@media(max-width:700px){
+.commission-toolbar .commission-filters>.btn{margin-left:0}
+.commission-view-filters{padding:0 16px 12px;gap:10px}
+.commission-view-filters>label:first-child{flex:1 1 100px}
+.commission-view-filters>label select{width:100%}
+.commission-view-filters>.commission-search-label{flex:1 1 100%;max-width:none;order:3}
+.commission-view-filters>.search-select,.commission-view-filters>#filter-owner{margin-left:0;min-width:0;flex:1 1 130px}
+.commission-filter-scope{padding:0 16px 16px}
+.commission-task-list{padding:0 16px}
+.commission-queue-heading{padding:14px 16px 9px}
+.commission-task{align-items:flex-start;gap:12px;flex-wrap:wrap}
+.commission-task-action{max-width:100%;width:100%;display:flex;justify-content:flex-end}
+.commission-task-main{flex-basis:100%}
+.commission-task-action .btn{min-height:32px}
+.commission-queue-more{padding:10px 16px 16px}
+.commission-queue.is-clear{padding:16px}
+.commission-tier-note{margin:0 16px 14px}
+.commission-amount-breakdown{padding:0 16px}
+.commission-history-filter select{width:190px}
+.commission-current-amount{max-width:55%}
+.commission-current-amount>strong{overflow-wrap:anywhere}
+}

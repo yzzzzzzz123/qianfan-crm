@@ -25,6 +25,10 @@ import {migrateOpportunityArchive} from './opportunity-archive-schema.mjs';
 import {migrateContractRetirement} from './contract-retirement-schema.mjs';
 import {migrateRetiredRenewalFields} from './retired-renewal-schema.mjs';
 import {migrateHistoricalOpportunityCustomers} from './historical-opportunity-customer-schema.mjs';
+import {migrateContractExpenses} from './contract-expense-schema.mjs';
+import {migrateNetProfit} from './net-profit-schema.mjs';
+import {migrateProfitAdmin} from './profit-schema.mjs';
+import {migrateCollectionLedger} from './collection-ledger-schema.mjs';
 
 export function openDatabase(filename) {
   if (filename !== ":memory:")
@@ -119,6 +123,10 @@ export function openDatabase(filename) {
   migrateContractRetirement(db);
   migrateRetiredRenewalFields(db);
   migrateHistoricalOpportunityCustomers(db);
+  migrateCollectionLedger(db);
+  migrateProfitAdmin(db);
+  migrateNetProfit(db);
+  migrateContractExpenses(db);
   return db;
   } catch(error) {db.close();throw error;}
 }

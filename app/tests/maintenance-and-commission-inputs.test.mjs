@@ -23,7 +23,7 @@ test('同一维护表单保存客户、创建时间、产品与实际到账，�
  body.fields.name='不应保存';body.payments[0].amount=2000;
  r=await f.request(`/contracts/${f.id}/maintenance`,{actor:f.admin,method:'PATCH',body});assert.equal(r.status,400,JSON.stringify(r.body));
  assert.deepEqual(one(f.db,'SELECT * FROM contracts WHERE id=?',f.id),before.c);assert.deepEqual(all(f.db,'SELECT * FROM contract_items WHERE contract_id=?',f.id),before.items);assert.deepEqual(all(f.db,'SELECT * FROM payments WHERE contract_id=?',f.id),before.p);assert.equal(one(f.db,'SELECT count(*) n FROM audit').n,before.audit);
- assert.equal((await f.request(`/contracts/${f.id}/maintenance`,{actor:f.sales,method:'PATCH',body:{fields:{name:'越权'},reason:'禁止'}})).status,403);
+ assert.equal((await f.request(`/contracts/${f.id}/maintenance`,{actor:await f.login(3),method:'PATCH',body:{fields:{name:'越权'},reason:'禁止'}})).status,403);
 });
 
 test('新增明细需显式填写且保留全部旧行，客户关系和字段类型继续校验',async t=>{
@@ -33,13 +33,15 @@ test('新增明细需显式填写且保留全部旧行，客户关系和字段�
  for(const fields of [{fake:1},{created_at:'2099-01-01T00:00:00Z'}])assert.equal((await f.request(`/contracts/${f.id}/maintenance`,{actor:f.admin,method:'PATCH',body:{fields,reason:'非法字段测试'}})).status,400);
 });
 
-test('维护字段仅显示一套编辑控件，金额与日期可编辑，不再重复只读总览',async t=>{
+test('日常项目表单保持简短，高级维护的自动汇总只读且不重复控件',async t=>{
  const f=await setup(t),S=(await f.request('/state',{actor:f.admin})).body;
- for(const type of ['contract-maintain','contract-project']){
-  const html=formWorkflow(S,type,f.id);assert.doesNotMatch(html,/maintenance-overview|<dl|readonly/);
-  for(const field of ['customer_id','name','owner_id','order_type','created_at','project_status'])assert.equal((html.match(new RegExp(`name="${field}"`,'g'))||[]).length,1,field);
-  for(const field of ['product_amount','product_margin_rate','product_margin','service_amount','service_margin','total_margin','collected','last_received_at'])assert.equal((html.match(new RegExp(`data-summary="${field}"`,'g'))||[]).length,1,field);
+ const html=formWorkflow(S,'contract-maintain',f.id);
+ for(const field of ['customer_id','name','owner_id','order_type','created_at','project_status'])assert.equal((html.match(new RegExp(`name="${field}"`,'g'))||[]).length,1,field);
+ for(const field of ['product_amount','product_margin_rate','product_margin','service_amount','service_margin','total_margin','collected','last_received_at']){
+  assert.equal((html.match(new RegExp(`data-summary="${field}"`,'g'))||[]).length,1,field);
+  assert.match(html,new RegExp(`readonly[^>]*data-summary="${field}"`));
  }
+ const project=formWorkflow(S,'contract-project',f.id);assert.match(project,/name="project_status"/);assert.doesNotMatch(project,/data-summary|data-pay-field|name="created_at"/);
 });
 
 function sourceClaim(f){
@@ -58,8 +60,8 @@ test('实际到账写入对应销售基数，合同结清来源仅待核对试�
  let inputs=commissionInputs(f.db,'2026-10'),basis=inputs.basis.find(u=>u.sales_id===2);assert.equal(basis.received_amount,baseline.received_amount);assert.equal(basis.source_claim_amount,100000);
  assert.ok(inputs.basis.every(u=>!one(f.db,'SELECT role,developer_admin,business_member FROM users WHERE id=?',u.sales_id).developer_admin));
  const s=(await f.request('/state?commissionPeriod=2026-10',{actor:f.admin})).body;
- const preview=s.commission.previews.find(p=>p.sales_id===2);assert.equal(preview.evidence.find(p=>p.contract_id===f.id).product_amount,60000);assert.equal(preview.blocked,true);assert.match(preview.issues.join('；'),/缺少逐笔到账/);assert.equal(one(f.db,'SELECT count(*) n FROM payments').n,before);
- assert.equal((await f.request('/commissions/confirm',{actor:f.admin,method:'POST',body:preview})).status,409);
+ const preview=s.commission.previews.find(p=>p.sales_id===2);assert.ok(!preview.evidence.some(p=>p.contract_id===f.id));assert.equal(preview.source_claims.find(p=>p.contract_id===f.id).product_amount,60000);assert.equal(preview.blocked,true);assert.match(preview.issues.join('；'),/缺少逐笔到账/);assert.equal(one(f.db,'SELECT count(*) n FROM payments').n,before);
+ assert.equal((await f.request('/commissions/confirm',{actor:f.admin,method:'POST',body:preview})).status,410);
  const paid=await f.request('/payments',{actor:f.admin,method:'POST',body:{contract_id:f.id,amount:100,product_amount:60,status:'已到账',pay_date:'2026-10-10'}});assert.equal(paid.status,200);
  inputs=commissionInputs(f.db,'2026-10');basis=inputs.basis.find(u=>u.sales_id===2);assert.equal(basis.received_amount,baseline.received_amount+10000);assert.equal(basis.receipt_count,baseline.receipt_count+1);assert.equal(basis.source_claim_amount,0);
  const other=(await f.request('/state?commissionPeriod=2026-10',{actor:await f.login(3)})).body.commission;assert.ok(other.sales_basis.every(p=>p.sales_id===3));

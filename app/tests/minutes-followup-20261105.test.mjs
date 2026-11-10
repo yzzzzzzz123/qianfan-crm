@@ -26,13 +26,13 @@ test('多笔到账维护更新同一合同汇总和十月取数，计划不计�
  assert.equal(c.collected,50000);assert.equal(c.outstanding,50000);assert.equal(c.payments.length,3);
  const audit=s.commission.receipt_review.filter(r=>r.contract_id===f.id);assert.equal(audit.length,2);assert.equal(audit.reduce((n,r)=>n+r.amount,0),50000);assert.equal(audit.reduce((n,r)=>n+r.product_amount,0),30000);
  const before=one(f.db,'SELECT * FROM payments WHERE id=?',pid);
- assert.equal((await f.request(`/payments/${pid}/details`,{actor:f.sales,method:'PATCH',body:{...body(100,100),reason:'越权'}})).status,403);
+ assert.equal((await f.request(`/payments/${pid}/details`,{actor:f.other,method:'PATCH',body:{...body(100,100),reason:'越权'}})).status,403);
  assert.equal((await f.request(`/payments/${pid}/details`,{actor:f.admin,method:'PATCH',body:{...body(800,400),reason:'超额'}})).status,409);
  assert.deepEqual(one(f.db,'SELECT * FROM payments WHERE id=?',pid),before);
  r=await f.request(`/payments/${pid}/details`,{actor:f.admin,method:'PATCH',body:{...body(250,150),note:'核对原件',reason:'修正实际到账'}});assert.equal(r.status,200,JSON.stringify(r.body));
  s=(await f.request('/state?commissionPeriod=2026-10',{actor:f.admin})).body;c=s.contracts.find(c=>c.id===f.id);assert.equal(c.collected,55000);assert.equal(c.outstanding,45000);
- const trial=s.commission.previews.find(p=>p.sales_id===2);assert.equal(trial.components[0].base,35000);assert.equal(trial.trial_only,true);assert.equal(trial.blocked,true);
- assert.equal((await f.request('/commissions/confirm',{actor:f.admin,method:'POST',body:trial})).status,409);
+ const trial=s.commission.previews.find(p=>p.sales_id===2);assert.equal(trial.components[0].base,7000);assert.equal(trial.trial_only,true);assert.equal(trial.blocked,true);
+ assert.equal((await f.request('/commissions/confirm',{actor:f.admin,method:'POST',body:trial})).status,410);
  assert.equal(one(f.db,'SELECT count(*) n FROM commission_batches').n,0);
  const own=(await f.request('/state?commissionPeriod=2026-10',{actor:f.other})).body.commission;assert.ok(own.receipt_review.every(p=>p.sales_id===3));
 });
@@ -48,29 +48,29 @@ test('合同明细整批维护可回读，关联金额冲突及后续字段错�
  assert.equal((await f.request(`/contracts/${f.id}`,{actor:f.admin,method:'PATCH',body:{items:[payload[0],payload[0]],reason:'重复明细'}})).status,400);
 });
 
-test('合同整行删除对有权销售开放，保留明细回款，越权、未确认、已结算合同不能删除',async t=>{
- const f=await setup(t);let r=await f.request('/payments',{actor:f.admin,method:'POST',body:{contract_id:f.id,...body(100,60)}});assert.equal(r.status,200);
- const rows=all(f.db,'SELECT * FROM contract_items WHERE contract_id=?',f.id),payments=all(f.db,'SELECT * FROM payments WHERE contract_id=?',f.id),b={confirmed:true,reason:'核对后删除隔离业务'};
+test('销售仅删除无实收草稿，已归档及已收款合同不能退出当前统计',async t=>{
+ const f=await setup(t);assert.equal((await f.request('/payments',{actor:f.admin,method:'POST',body:{contract_id:f.id,...body(100,60)}})).status,200);
+ const before={items:all(f.db,'SELECT * FROM contract_items WHERE contract_id=?',f.id),payments:all(f.db,'SELECT * FROM payments WHERE contract_id=?',f.id)},b={confirmed:true,reason:'核对隔离业务'};
  assert.equal((await f.request(`/contracts/${f.id}`,{actor:f.other,method:'DELETE',body:b})).status,403);
- assert.equal((await f.request(`/contracts/${f.id}`,{actor:f.sales,method:'DELETE',body:{reason:'未确认'}})).status,400);
- r=await f.request(`/contracts/${f.id}`,{actor:f.sales,method:'DELETE',body:b});assert.equal(r.status,200,JSON.stringify(r.body));
- assert.ok(one(f.db,'SELECT retired_at FROM contracts WHERE id=?',f.id).retired_at);
- assert.deepEqual(all(f.db,'SELECT * FROM contract_items WHERE contract_id=?',f.id),rows);assert.deepEqual(all(f.db,'SELECT * FROM payments WHERE contract_id=?',f.id),payments);
- const s=(await f.request('/state?commissionPeriod=2026-10',{actor:f.admin})).body;assert.ok(!s.contracts.some(c=>c.id===f.id));assert.ok(!s.commission.receipt_review.some(p=>p.contract_id===f.id));
- assert.equal((await f.request(`/contracts/${f.id}`,{actor:f.sales,method:'DELETE',body:b})).status,410);
- const locked=one(f.db,'SELECT id FROM contracts WHERE retired_at IS NULL LIMIT 1').id,item=one(f.db,'SELECT id FROM contract_items WHERE contract_id=?',locked);
- const batch=Number(run(f.db,"INSERT INTO commission_batches(sales_id,kind,period,base,rate,amount,status,snapshot,created_at,confirmed_by) VALUES(2,'personal','2026-10',100,.1,10,'confirmed','{}','2026-11-01',1)").lastInsertRowid);
- run(f.db,'INSERT INTO commission_lines(batch_id,contract_id,item_id,base,rebate_rate,rate,amount) VALUES(?,?,?,?,?,?,?)',batch,locked,item.id,100,.1,.1,10);
- assert.equal((await f.request(`/contracts/${locked}`,{actor:f.admin,method:'DELETE',body:b})).status,409);assert.equal(one(f.db,'SELECT retired_at FROM contracts WHERE id=?',locked).retired_at,null);
+ for(const actor of [f.admin,f.sales])assert.equal((await f.request(`/contracts/${f.id}`,{actor,method:'DELETE',body:b})).status,409);
+ assert.equal(one(f.db,'SELECT retired_at FROM contracts WHERE id=?',f.id).retired_at,null);
+ assert.deepEqual(all(f.db,'SELECT * FROM contract_items WHERE contract_id=?',f.id),before.items);assert.deepEqual(all(f.db,'SELECT * FROM payments WHERE contract_id=?',f.id),before.payments);
+ assert.ok((await f.request('/state',{actor:f.admin})).body.contracts.some(c=>c.id===f.id));
+ const draft=await f.request('/contracts',{actor:f.admin,method:'POST',body:{customer_id:2,owner_id:2,name:'可删除草稿',sign_date:'2026-11-01',items:[{name:'产品',kind:'标品',amount:100}]}});assert.equal(draft.status,200);
+ const id=draft.body.id;run(f.db,"UPDATE contracts SET lifecycle='草稿' WHERE id=?",id);assert.equal((await f.request(`/contracts/${id}`,{actor:f.sales,method:'DELETE',body:{reason:'未确认'}})).status,400);
+ assert.equal((await f.request(`/contracts/${id}`,{actor:f.sales,method:'DELETE',body:b})).status,200);
+ assert.ok(one(f.db,'SELECT retired_at FROM contracts WHERE id=?',id).retired_at);assert.equal((await f.request(`/contracts/${id}`,{actor:f.sales,method:'DELETE',body:b})).status,410);
 });
 
-test('合同及回款列表每个字段都出现在对应详情与维护总览，经销品标识不再展示',async t=>{
+test('完整台账保留全部字段，详情提供项目资料；日常操作表单不重复财务汇总',async t=>{
  const f=await setup(t),S=(await f.request('/state',{actor:f.admin})).body,c=S.contracts.find(c=>c.id===f.id);
- for(const [fields,list,detail,form] of [[contractFields(S,c),contractList(S,{}),contractDetail(S,c.id),formWorkflow(S,'contract-maintain',c.id)],[collectionFields(S,c),collectionsPage({...S,collections:[c]},{}),collectionDetail({...S,collections:[c]},c.id),formWorkflow(S,'contract-project',c.id)]]){
-  for(const [label] of fields){assert.ok(list.includes(label),label);assert.ok(detail.includes(label),label);const alias={'客户名称 / 合同':'客户名称','关联合同 / 客户名称':'合同编号','是否已回款':'回款状态','实际回款时间':'回款时间'};assert.ok(form.includes(alias[label]||label),label);}
-  for(const html of [list,detail,form])assert.ok(!html.includes('经销品标识'));
+ const aliases={'关联合同 / 客户名称':'客户名称 / 合同','产品':'售卖产品','实际回款时间':'回款时间','未回款金额':'未收金额'};
+ for(const [fields,list,detail] of [[contractFields(S,c),contractList(S,{tableView:'ledger'}),contractDetail(S,c.id)],[collectionFields(S,c),collectionsPage({...S,collections:[c]},{tableView:'ledger'}),collectionDetail({...S,collections:[c]},c.id)]]){
+  for(const [label] of fields){assert.ok(list.includes(label),label);assert.ok(detail.includes(aliases[label]||label),label);}
+  for(const html of [list,detail])assert.ok(!html.includes('经销品标识'));
  }
- assert.match(contractDetail(S,c.id),/回款明细（0）/);assert.match(formWorkflow(S,'contract-maintain',c.id),/data-contract-item/);
+ const short=formWorkflow(S,'contract-project',c.id);assert.match(short,/项目状态/);assert.match(short,/研发交付人员/);assert.doesNotMatch(short,/data-summary|data-pay-field/);
+ assert.match(contractDetail(S,c.id),/实际到账流水（0）/);assert.match(formWorkflow(S,'contract-maintain',c.id),/data-contract-item/);
 });
 
 test('历史来源投影不覆盖人工维护后的合同产品与毛利',()=>{

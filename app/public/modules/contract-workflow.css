@@ -10,3 +10,82 @@
 
 .maintenance-payment{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin:12px 0;padding:16px;border:1px solid var(--line);border-radius:8px;min-width:0}.maintenance-payment legend{padding:0 6px;color:var(--muted);font-size:12px}.maintenance-payment .field{min-width:0}.maintenance-payment input,.maintenance-payment select{box-sizing:border-box;width:100%;min-width:0}.maintenance-items .section-head,.maintenance-payments .section-head{align-items:center}.maintenance-attachments{border-top:1px solid var(--line);padding-top:16px}
 @media(max-width:640px){.maintenance-payment{grid-template-columns:1fr}.maintenance-items .section-head,.maintenance-payments .section-head{display:flex;flex-wrap:wrap}}
+
+/* The daily view keeps the money and next action in one desktop viewport. */
+.workflow-scope-caption{font-size:12px;color:var(--secondary);margin:0 0 10px}
+.workflow-list-toolbar{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:14px 18px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.workflow-scopes,.workflow-view-controls{display:flex;align-items:center;gap:4px;flex-wrap:wrap}
+.workflow-scopes .btn,.workflow-view-controls .btn{font-size:12px;min-height:36px;padding:7px 10px;background:transparent;border-color:transparent}
+.workflow-scopes .active,.workflow-view-controls .active{color:var(--brand);background:var(--sail-soft);border-color:#d4e5fa}
+.workflow-filtered-summary>.metrics{grid-template-columns:repeat(3,minmax(0,1fr))}
+.workflow-selected-contract{display:flex;align-items:center;gap:14px;font-size:13px;margin-bottom:16px}
+.contract-workflow-table.workflow-daily-table{min-width:0;width:100%;table-layout:fixed}
+.workflow-daily-table th{font-size:12px;line-height:1.6;padding:13px 10px}
+.workflow-daily-table td,.workflow-daily-table td:first-child,.workflow-daily-table td:last-child,.workflow-daily-table td.number{min-width:0;max-width:none;padding:15px 10px;font-size:14px;vertical-align:middle;line-height:1.65}
+.workflow-daily-table td.number{font-variant-numeric:tabular-nums;white-space:nowrap}
+.workflow-daily-table th:nth-child(n+3):nth-child(-n+5){text-align:right}
+.workflow-daily-table .record-meta{font-size:12px;line-height:1.6;margin-top:3px;overflow:hidden;text-overflow:ellipsis}
+.workflow-daily-table .workflow-contract-name{white-space:nowrap}
+.workflow-daily-table td .btn{font-size:12px;min-height:36px;padding:7px 10px;white-space:nowrap;max-width:100%}
+.workflow-record-title{font:inherit;font-weight:600;color:var(--ink);border:0;background:none;padding:0;text-align:left;cursor:pointer;max-width:100%;overflow-wrap:anywhere}
+.workflow-record-title:hover{text-decoration:underline;color:var(--brand)}
+.workflow-status-stack{display:flex;flex-direction:column;align-items:flex-start;gap:5px}
+.workflow-daily-table .badge,.workflow-workspace .badge{font-size:12px;line-height:1.6;white-space:normal}
+.workflow-outstanding{color:#9a4e21}
+.workflow-outstanding small{display:block;font-size:11px;font-weight:400;white-space:normal}
+.workflow-list-total{display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;font-size:12px}
+.workflow-ledger-table th{font-size:12px}.workflow-ledger-table td{font-size:13px}
+.workflow-ledger-table .payment-list{min-width:500px}
+.workspace-head .icon-btn{width:36px;height:36px;flex:none;padding:8px;white-space:nowrap}
+.workflow-workspace{font-size:14px}
+.workflow-money-summary>div>span{font-size:12px}.workflow-money-summary b{font-size:24px}
+.workflow-money-summary>div{min-width:0}.workflow-money-summary{font-variant-numeric:tabular-nums}
+.workflow-primary-actions{margin:18px 0;flex-wrap:wrap}
+.workflow-primary-actions .btn{font-size:13px;min-height:40px}
+.workspace-tabs{display:flex;gap:24px;border-bottom:1px solid var(--line);margin:22px 0 20px;overflow-x:auto}
+.workspace-tabs button{flex:none;font:inherit;font-size:13px;border:0;border-bottom:2px solid transparent;padding:0 0 12px;background:none;color:var(--secondary);cursor:pointer}
+.workspace-tabs button.active{color:var(--brand);border-color:var(--brand);font-weight:600}
+.workflow-workspace [hidden]{display:none!important}
+.workflow-overview-actions{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:14px}
+.workflow-workspace .aligned-facts dt{font-size:13px;color:var(--secondary)}
+.workflow-workspace .aligned-facts dd{font-size:14px;line-height:1.7}
+.workflow-workspace .record-meta{font-size:12px;line-height:1.7}
+.workflow-workspace .detail-table th{font-size:12px}.workflow-workspace .detail-table td{font-size:14px}
+.workflow-plan-section .section-head,.workflow-receipts .section-head{align-items:center;flex-wrap:wrap;gap:12px}
+.workflow-plan-card{padding:16px 18px;margin:12px 0;border:1px solid #dbe5ef;border-radius:10px;background:#f9fbfe;min-width:0}
+.workflow-plan-card.closed{background:#f6f8fa}.workflow-plan-card p{margin-top:7px;font-size:13px}.workflow-plan-card small{display:block;margin-top:6px;color:var(--secondary);font-size:12px}
+.workflow-plan-top{display:flex;align-items:flex-start;justify-content:space-between;gap:18px;flex-wrap:wrap}
+.workflow-plan-top>div{min-width:0}.workflow-plan-top strong{font-size:15px;font-variant-numeric:tabular-nums}
+.workflow-plan-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:10px}
+.workflow-plan-actions .btn{font-size:12px;padding:4px 0;min-height:30px}
+.workflow-more{position:relative;font-size:12px}.workflow-more summary{cursor:pointer;color:var(--secondary);padding:8px}
+.workflow-more[open]{display:flex;flex-wrap:wrap}.workflow-more[open] .btn{display:block}
+.workflow-closed-plans{margin-top:16px}.workflow-closed-plans>summary{font-size:13px;color:var(--secondary);padding:10px 0;cursor:pointer}
+.workflow-receipt{border-bottom:1px solid var(--line);padding:19px 0}.workflow-receipt:last-child{border-bottom:0}
+.workflow-receipt p{margin-top:6px;font-size:13px}.workflow-receipt small,.workflow-record-note{font-size:12px;color:var(--secondary);line-height:1.7}
+.workflow-allocation{display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-size:13px;margin:8px 0}
+.workflow-notice{padding:13px 16px;background:#edf5ff;border:1px solid #d8e8fb;color:#315d86;border-radius:8px;font-size:13px;line-height:1.8;margin:12px 0}
+.workflow-notice>span,.workflow-notice>strong{display:block}.workflow-notice.warning{background:#fff8ec;border-color:#ebd7b3;color:#835e22}
+.dialog-body>.workflow-notice{margin:0}
+.receipt-preview{border:1px solid #d2e3f6;background:#f5faff;padding:14px 16px;border-radius:9px;font-size:13px;line-height:1.9}
+.receipt-preview strong{display:block;font-size:14px;margin-bottom:6px}
+.receipt-preview dl{display:grid;grid-template-columns:1fr auto;gap:5px 15px;margin:0}.receipt-preview dd{margin:0;text-align:right;font-variant-numeric:tabular-nums;font-weight:600}
+.workflow-extra>summary{cursor:pointer;font-size:13px;color:var(--secondary)}
+.duplicate-check{padding:14px 16px;border:1px solid #e5cc9f;background:#fff7e8;border-radius:9px;font-size:13px;line-height:1.8}
+.duplicate-description{margin-bottom:10px!important}.duplicate-check .field{margin-top:12px}
+.maintenance-section{border:1px solid var(--line);border-radius:9px}.maintenance-section>summary{cursor:pointer;padding:13px 15px;font-size:14px;font-weight:600}.maintenance-section>.form-grid{padding:4px 15px 18px}
+.maintenance-item input[readonly]{background:#eef2f6}.maintenance-section .maintenance-items,.maintenance-section .maintenance-payments{width:100%}
+.workflow-file{padding:14px 0;border-bottom:1px solid var(--line);font-size:14px}.workflow-file .btn{font-size:14px;max-width:100%;white-space:normal;overflow-wrap:anywhere}.workflow-file small{display:block;margin-top:5px;color:var(--secondary);font-size:12px}
+.workflow-ai-extra{margin-top:24px}.workflow-ai-extra>summary{cursor:pointer;color:var(--secondary);font-size:13px}
+.workflow-history article{padding:16px 0;border-bottom:1px solid var(--line)}.workflow-history small{display:block;color:var(--secondary);font-size:12px;margin:5px 0}.workflow-history p{font-size:13px;line-height:1.8}.workflow-history details>summary{font-size:12px;color:var(--brand);cursor:pointer;margin:8px 0}
+.workflow-change-table{width:100%;border-collapse:collapse;font-size:13px;table-layout:fixed}.workflow-change-table th,.workflow-change-table td{padding:8px;border:1px solid var(--line);overflow-wrap:anywhere;text-align:left}
+.workflow-history-card{display:flex;justify-content:space-between;align-items:center;gap:18px;padding:18px 0;border-bottom:1px solid var(--line)}.workflow-history-card p{font-size:13px;margin:6px 0}.workflow-history-card small{font-size:12px;color:var(--secondary)}
+@media(max-width:1100px){.workflow-daily-table th,.workflow-daily-table td,.workflow-daily-table td:first-child,.workflow-daily-table td:last-child,.workflow-daily-table td.number{padding-inline:8px}.workflow-list-toolbar{padding-inline:12px;gap:8px}.workflow-scopes .btn{padding-inline:8px}}
+@media(max-width:800px){.contract-workflow-table.workflow-daily-table{min-width:920px}.workspace-tabs{gap:18px}.workflow-money-summary b{font-size:20px}.workflow-filtered-summary>.metrics{grid-template-columns:1fr}.workflow-history-card{align-items:flex-start;flex-direction:column}}
+.workflow-daily-table col:nth-child(1){width:24%}.workflow-daily-table col:nth-child(2){width:10%}.workflow-daily-table col:nth-child(3),.workflow-daily-table col:nth-child(4),.workflow-daily-table col:nth-child(5){width:11%}.workflow-daily-table col:nth-child(6){width:12%}.workflow-daily-table col:nth-child(7){width:8%}.workflow-daily-table col:nth-child(8){width:13%}
+.contract-workflow-summary .metric p .btn{display:inline;min-height:0;padding:0 3px;font-size:11px;line-height:1.7;border:0}
+.form-dialog:has(form[data-form=payment]),.form-dialog:has(form[data-form=collection-receive]),.form-dialog:has(form[data-form=payment-plan-create]){width:min(720px,calc(100vw - 32px))}
+.form-dialog:has(form[data-form=payment]) .dialog-body,.form-dialog:has(form[data-form=collection-receive]) .dialog-body,.form-dialog:has(form[data-form=payment-plan-create]) .dialog-body{gap:14px;padding:20px 24px}
+.form-dialog .workflow-plan-context{font-size:12px;line-height:1.7;display:flex;align-items:center;gap:6px;flex-wrap:wrap;color:var(--secondary)}
+.form-dialog .workflow-plan-context .btn{font-size:12px;padding:3px 6px;min-height:28px}
+.form-dialog .field-help{margin-top:0;font-size:12px;line-height:1.7}

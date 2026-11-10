@@ -2,15 +2,15 @@ import {esc,icon,empty} from '../ui.js';
 
 export const manualCreateActions=Object.freeze({
   'new-customer':'customer','new-contact':'contact','new-opportunity':'opportunity','new-activity':'activity',
-  'new-quote':'quote','new-contract':'contract','new-payment':'payment',convert:'convert',
+  'new-quote':'quote','new-contract':'contract','new-payment':'payment','new-payment-plan':'payment-plan-create',convert:'convert',
 });
 export const manualFormRoles=Object.freeze({
   customer:['admin','sales'],contact:['admin','sales'],opportunity:['admin','sales'],activity:['admin','sales','pm'],quote:['admin','sales'],
-  contract:['admin'],convert:['admin'],payment:['admin'],user:[],target:['admin'],'archive-contract':['admin'],
+  contract:['admin','sales'],convert:['admin','sales'],payment:['admin','sales'],'payment-plan-create':['admin','sales'],user:[],target:['admin'],'archive-contract':['admin','sales'],
   'document-templates':['admin'],rules:['admin'],'finance-rules':['admin'],'sales-commission-policy':['admin'],
   'commission-confirm':['admin'],'commission-pay':['admin'],'performance-review':['admin'],
 });
-const labels={customer:'新建客户',contact:'新建联系人',opportunity:'新建商机',activity:'新建跟进',quote:'新建报价',contract:'起草合同',payment:'新建回款',target:'设置季度目标','document-templates':'填写公司模板',rules:'设置阶段与动作','finance-rules':'设置提成与绩效规则'};
+const labels={customer:'新建客户',contact:'新建联系人',opportunity:'新建商机',activity:'新建跟进',quote:'新建报价',contract:'新增合同',payment:'新建回款',target:'设置季度目标','document-templates':'填写公司模板',rules:'设置阶段与动作','finance-rules':'设置提成与绩效规则'};
 export function manualChoices(S,P) {
   const common=['customer','contact','opportunity','activity','quote','contract','payment'];
   const byView={workbench:common,analytics:common,personal:common,customers:['customer','contact'],assets:['customer','contact'],opportunities:['opportunity','quote','activity'],funnel:['opportunity'],activities:['activity'],contracts:['contract'],collections:['payment']};

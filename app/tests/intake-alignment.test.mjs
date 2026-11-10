@@ -38,7 +38,7 @@ test('每个AI字段都有真实SQLite列或明确控制用途，角色动作与
       }
     }
   }
-  assert.deepEqual(allowedIntakeActions('contract','sales'),[]);
+  assert.deepEqual(allowedIntakeActions('contract','sales'),['create','update']);
   assert.deepEqual(allowedIntakeActions('contract','pm'),['update']);
   assert.deepEqual(operationFields('contract','update','pm'),['scope','project_status','delivery_staff','project_note']);
   assert.deepEqual(allowedIntakeActions('payment','admin'),['create']);

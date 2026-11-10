@@ -1,7 +1,7 @@
 // Confirmed in the 2026-11-01 meeting and the user's subsequent service table.
 // A null rate is deliberately unresolved; it must never become an implicit zero.
 export const SALES_POLICY = {
-  version: 'sales-20261101', effective_month: '2026-11', service_aggregation: 'contract', service_scope_confirmed: false,
+  version: 'sales-20261101', effective_month: '2026-11', service_aggregation: 'month', service_scope_confirmed: true,
   product: [
     { min: 0, rates: { D: 0, C: 0, B: 0, A: null } },
     { min: 2000000, rates: { D: .05, C: .08, B: .10, A: .12 } },
@@ -22,7 +22,7 @@ export function bandFor(bands, amount) {
 }
 
 export function contractSplit(contract, items) {
-  const rows = items.filter(i => i.contract_id === contract.id);
+  const rows = items.filter(i => i.contract_id === contract.id && !i.retired_at);
   if (!rows.length || rows.some(i => !['标品','实施','定开','交付','运维'].includes(i.kind)) || rows.reduce((s,i)=>s+i.amount,0)!==contract.amount)
     return { valid:false, reason:'合同明细分类或金额不完整，不能确定产品与服务金额', items:rows };
   const product = rows.filter(i=>i.kind==='标品').reduce((s,i)=>s+i.amount,0);

@@ -1,31 +1,18 @@
+import {expenseDetailCounts} from './contract-expenses.mjs';
 import { all, one } from '../database.mjs';
 import { code, risk, period, quarter, today, STAGES } from '../domain.mjs';
 import { publicUser } from './auth.mjs';
-import { commissionPreview, performanceFor, managerId } from './incentives.mjs';
+import { commissionPreview, performanceFor, managerId,contractLocks } from './incentives.mjs';
+import {ledgerPayments} from '../collection-ledger.mjs';
 import { integrationSettings } from './setup.mjs';
 import {batchHistory} from './intake-receipts.mjs';
 import {businessTableCatalog} from './intake-fields.mjs';
 import {deriveQuoteTotals} from '../quote-values.mjs';
-import {contractSplit} from '../sales-policy.mjs';
+import {contractFinancials,effectiveContractFinancials} from '../contract-financials.mjs';
 import {qfcrmSourceFields,contractSourceFields,importedCollections} from '../qfcrm-source-fields.mjs';
 const sum=(a,fn)=>a.reduce((s,x)=>s+fn(x),0);
 const elapsed=(d)=>d?Math.max(0,Math.floor((new Date(today())-new Date(d.slice(0,10)))/86400000)):0;
-export function contractFinancials(contract,items,{hideMargin=false}={}) {
-  const split=contractSplit(contract,items);
-  const rows=items.filter(i=>i.contract_id===contract.id);
-  const products=rows.filter(i=>i.kind==='标品'),services=rows.filter(i=>i.kind!=='标品');
-  const margin=group=>hideMargin||!split.valid||group.some(i=>i.margin===null||i.margin===undefined)?null:sum(group,i=>i.margin);
-  const productMargin=margin(products),serviceMargin=margin(services);
-  return {
-    product_names:[...new Set(rows.map(i=>i.name).filter(Boolean))],
-    product_types:[...new Set(rows.map(i=>i.kind).filter(Boolean))],
-    financials_complete:split.valid,
-    product_amount:split.valid?split.product:null,service_amount:split.valid?split.service:null,
-    product_margin:productMargin,service_margin:serviceMargin,
-    product_margin_rate:productMargin!==null&&split.product>0?productMargin/split.product:null,
-    total_margin:productMargin===null||serviceMargin===null?null:productMargin+serviceMargin,
-  };
-}
+export {contractFinancials} from '../contract-financials.mjs';
 export function contractDashboard(contracts,month,asOf=today()) {
   const included=contracts.filter(c=>!c.retired_at&&c.lifecycle!=='草稿');
   return {month,
@@ -33,7 +20,7 @@ export function contractDashboard(contracts,month,asOf=today()) {
     received_amount:sum(included.flatMap(c=>c.payments).filter(p=>p.status==='已到账'&&p.pay_date?.startsWith(month+'-')),p=>p.amount),
     outstanding_amount:sum(included,c=>c.outstanding),
     expiring_amount:sum(included.filter(c=>c.valid_until?.startsWith(month+'-')),c=>c.amount),
-    overdue_amount:sum(included.flatMap(c=>c.payments).filter(p=>p.status!=='已到账'&&p.promise_date&&p.promise_date<asOf),p=>p.amount),
+    overdue_amount:sum(included.filter(c=>c.outstanding>0),c=>Math.min(c.outstanding,sum(c.payments.filter(p=>['待到账','逾期'].includes(p.status)&&p.promise_date&&p.promise_date<asOf),p=>p.remaining_amount??p.amount))),
     outstanding_basis:'全部非草稿合同金额减累计实际到账，不限制签约月份',
   };
 }
@@ -121,20 +108,23 @@ export function buildState(context,actor) {
   const activities=allActivities.filter(a=>oppIds.has(a.opportunity_id)&&(!a.minutes_record_id||isAdmin||!isPm&&ownMinutes.has(a.minutes_record_id))).map(a=>({...a,sources:[...new Set(events.filter(e=>e.activity_id===a.id).map(e=>e.source))].concat(events.some(e=>e.activity_id===a.id)?[]:[a.source])}));
   const quotes=isPm?[]:rawQuotes.filter(q=>oppIds.has(q.opportunity_id)).map(q=>({...q,...deriveQuoteTotals(q.items),items:JSON.parse(q.items||'[]'),code:code('BJ',q.id,q.created_at)}));
   const contracts=all(db,'SELECT c.*,customer.name AS customer_name FROM contracts c JOIN customers customer ON customer.id=c.customer_id WHERE c.retired_at IS NULL ORDER BY c.id DESC').filter(c=>isAdmin||(isPm?c.collaborator_pm===actor.id||linkedCustomers.has(c.customer_id):c.owner_id===actor.id)).map(c=>{
-    const payments=all(db,'SELECT * FROM payments WHERE contract_id=? ORDER BY id DESC',c.id).map(p=>{
-      const days=p.status==='已到账'?0:elapsed(p.promise_date);
-      return {...p,status:p.status!=='已到账'&&p.promise_date&&p.promise_date<today()?'逾期':p.status,escalation:days>=7?'critical':days>0?'warning':p.status!=='已到账'&&p.checkpoint_date&&p.checkpoint_date<=today()?'attention':'normal',overdue_days:days};
-    });
+    const payments=ledgerPayments(db,c.id);
     const collected=sum(payments.filter(p=>p.status==='已到账'),p=>p.amount);
-    const rawItems=all(db,'SELECT * FROM contract_items WHERE contract_id=?',c.id);
-    const items=rawItems.map(i=>{if(!isPm)return i;const {rate,margin,...safe}=i;return safe;});
-    const financials=contractFinancials(c,rawItems,{hideMargin:isPm});
+    const rawItems=all(db,'SELECT * FROM contract_items WHERE retired_at IS NULL AND contract_id=?',c.id);
+    const expenseCounts=expenseDetailCounts(db,c.id);
+    const items=rawItems.map(i=>{if(!isPm)return {...i,expense_detail_count:expenseCounts.get(i.id)||0};const {rate,margin,margin_before_expense,business_expense,...safe}=i;return safe;});
+    const financials=effectiveContractFinancials(c,rawItems,payments,importedSources.contracts.get(c.id),{hideMargin:isPm});
     const days=c.valid_until?Math.floor((new Date(c.valid_until)-new Date(today()))/86400000):null;
     const marginUnknown=financials.total_margin===null;
     const attachments=all(db,"SELECT id,filename,mime_type,size,sha256,source_path,created_at,created_by FROM attachments WHERE entity='contract' AND entity_id=? ORDER BY id",c.id);
     const receivedDates=payments.filter(p=>p.status==='已到账'&&p.pay_date).map(p=>p.pay_date).sort();
-    const expectedDates=payments.filter(p=>p.status!=='已到账'&&p.promise_date).map(p=>p.promise_date).sort();
-    return {...c,...financials,sources:sources('contract',c.id),attachments,can_read_sources:!isPm,can_download_attachments:!isPm,code:c.contract_no||code('HT',c.id,c.created_at),items,payments,collected,collection_status:collected===0?'未回款':collected<c.amount?'部分回款':'已结清',received_status:collected===0?'否':collected<c.amount?'部分回款':'是',outstanding:c.amount-collected,last_received_at:receivedDates.at(-1)||null,next_expected_at:expectedDates[0]||null,renewal_days:days,renewal_due:days!==null&&days<=30,margin_unknown:marginUnknown,margin:financials.total_margin,...contractSourceFields(c,rawItems,payments,importedSources.contracts.get(c.id),{hideMargin:isPm})};
+    const plans=payments.filter(p=>p.record_type==='plan'),planned=plans.reduce((s,p)=>s+p.remaining_amount,0);
+    const expectedDates=plans.filter(p=>p.remaining_amount>0&&p.promise_date).map(p=>p.promise_date).sort();
+    const history=all(db,'SELECT a.id,a.action,a.detail,a.created_at,u.name user_name FROM audit a LEFT JOIN users u ON u.id=a.user_id WHERE a.entity=\'contract\' AND a.entity_id=? ORDER BY a.id DESC LIMIT 30',c.id).map(({detail,...row})=>({...row,...(!isPm?{detail:JSON.parse(detail||'{}')}:{})}));
+    return {...c,...financials,sources:sources('contract',c.id),attachments,can_read_sources:!isPm,can_download_attachments:!isPm,code:c.contract_no||code('HT',c.id,c.created_at),items,payments,plans,collected,collection_status:collected===0?'未回款':collected<c.amount?'部分回款':'已结清',received_status:collected===0?'否':collected<c.amount?'部分回款':'是',outstanding:c.amount-collected,last_received_at:receivedDates.at(-1)||null,next_expected_at:expectedDates[0]||null,renewal_days:days,renewal_due:days!==null&&days<=30,margin_unknown:marginUnknown,margin:financials.total_margin,...contractSourceFields(c,rawItems,payments,importedSources.contracts.get(c.id),{hideMargin:isPm}),
+      retired_items:!isPm?all(db,'SELECT * FROM contract_items WHERE contract_id=? AND retired_at IS NOT NULL',c.id):[],locks:contractLocks(db,c.id),history,termination_request:one(db,'SELECT r.*,u.name requested_by_name FROM contract_exit_requests r LEFT JOIN users u ON u.id=r.requested_by WHERE r.contract_id=? ORDER BY r.id DESC LIMIT 1',c.id)||null,
+      planned_remaining:planned,unplanned_amount:Math.max(0,c.amount-collected-planned),needs_plan_review:planned>c.amount-collected,
+    };
   });
   const performance=isPm?[]:all(db,"SELECT * FROM users WHERE role='sales' AND active=1 AND business_member=1 AND developer_admin=0").filter(u=>isAdmin||u.id===actor.id).map(u=>performanceFor(db,rules,u,month));
   const team=users.filter(u=>u.active&&(u.role==='sales'||u.id===managerId(db,rules))&&(isAdmin||u.id===actor.id)).map(u=>{
@@ -155,6 +145,6 @@ export function buildState(context,actor) {
     refresh:{enabled:false,schedule:null,missedRunPolicy:null,lastRun:one(db,'SELECT created_at FROM daily_reports ORDER BY day DESC LIMIT 1')?.created_at||null},
     audit:isAdmin?all(db,"SELECT a.*,u.name user_name,op.name operator_name,target.name acting_as_name FROM audit a LEFT JOIN users u ON u.id=a.user_id LEFT JOIN users op ON op.id=CASE WHEN json_valid(a.detail) THEN json_extract(a.detail,'$.operator_user_id') END LEFT JOIN users target ON target.id=CASE WHEN json_valid(a.detail) THEN json_extract(a.detail,'$.acting_as_user_id') END ORDER BY a.id DESC LIMIT 200"):[],
     ...(isAdmin?{integrationSettings:integrationSettings(db)}:{}),
-    ai:{configured:!!ai.configured,model:ai.model||'qwen/qwen3.8-max',batches:batchHistory(db,actor),importHistory:imported,businessTables:businessTableCatalog(db,actor.role)},
-    integrations:[{id:'dingtalk',name:'钉钉身份登录',status:ding.loginConfigured?'服务端已配置':'待配置企业应用',description:'企业身份校验后映射到本地角色；成员本人扫码需实际验收。'},{id:'minutes',name:'钉钉听记',status:context.minutes?.enabled?'接口连接可用':'待配置连接器',description:'成员本人授权后从连接时起采集新听记；总结、逐字稿及录音分别记录实际读取状态。'},{id:'templates',name:'报价与合同文件',status:integrationSettings(db).documents.confirmed?'公司模板已确认':'内部核对稿可导出',description:'公司报价与合同模板统一通过AI接收维护；未确认时文件明确标注内部核对稿。'},{id:'llm',name:'AI资料接收',status:ai.configured?'派欧云Qwen已配置':'待配置AI凭据',description:'统一接收资料，校验并经确认后入库；商机 AI 分析仅在手动点击后结合当前客户资料、售卖产品及跟进记录生成，原阶段规则建议继续保留；合同附件提取仅形成核对提案。'}]};
+    ai:{configured:!!ai.configured,model:ai.model||'deepseek-v4-1-flash',batches:batchHistory(db,actor),importHistory:imported,businessTables:businessTableCatalog(db,actor.role)},
+    integrations:[{id:'dingtalk',name:'钉钉身份登录',status:ding.loginConfigured?'服务端已配置':'待配置企业应用',description:'企业身份校验后映射到本地角色；成员本人扫码需实际验收。'},{id:'minutes',name:'钉钉听记',status:context.minutes?.enabled?'接口连接可用':'待配置连接器',description:'成员本人授权后从连接时起采集新听记；总结、逐字稿及录音分别记录实际读取状态。'},{id:'templates',name:'报价与合同文件',status:integrationSettings(db).documents.confirmed?'公司模板已确认':'内部核对稿可导出',description:'公司报价与合同模板统一通过AI接收维护；未确认时文件明确标注内部核对稿。'},{id:'llm',name:'AI资料接收',status:ai.configured?'紫猫云 DeepSeek已配置':'待配置AI凭据',description:'统一接收资料，校验并经确认后入库；商机 AI 分析仅在手动点击后结合当前客户资料、售卖产品及跟进记录生成，原阶段规则建议继续保留；合同附件提取仅形成核对提案。'}]};
 }

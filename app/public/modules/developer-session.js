@@ -1,4 +1,5 @@
 import { esc, icon } from '../ui.js';
+import {presenceControl} from './developer-presence.js';
 
 const roleName = role => ({admin:'管理员',sales:'销售',pm:'协作PM'}[role] || role);
 export function sessionControl(S) {
@@ -12,6 +13,7 @@ export function sessionControl(S) {
         <div role="listbox" aria-label="可切换用户">${users.map(user=>`<button type="button" role="option" aria-selected="${user.id===S.actor.id}" data-action="developer-select" data-id="${user.id}" data-identity-label="${esc(label(user))}"><span>${esc(label(user))}</span>${user.id===S.actor.id?icon('check'):''}</button>`).join('')}</div><p class="developer-no-results" hidden>没有匹配的用户</p>
       </div>
     </details>
+    ${presenceControl()}
     <button type="button" class="btn ghost" data-action="logout">退出登录</button>
   </div>`;
 }

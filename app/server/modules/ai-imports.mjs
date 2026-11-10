@@ -4,11 +4,11 @@ import { assert, now, text, normalize } from '../domain.mjs';
 import { inputHash, validateUpload } from '../ai-intake.mjs';
 
 import {intakeSchema as definitions,fieldNames,intakeTypes,intakeRelations,intakeAliases,aliasFields,operationFields} from '../../public/modules/intake-schema.js';
-import {commissionPreview} from './incentives.mjs';
 import {operationDestinations,batchRecords} from './intake-receipts.mjs';
 import {integrationSettings} from './setup.mjs';
 import {attachContractFile} from './source-records.mjs';
 import {intakeStorageMatches} from './intake-fields.mjs';
+import {canManageContractData} from '../contract-access.mjs';
 export {fieldNames};
 const hasValue=value=>value!==undefined&&value!==null&&(typeof value!=='string'||value.trim()!=='')&&(!Array.isArray(value)||value.length>0);
 const aliases=intakeAliases;
@@ -22,7 +22,7 @@ export function intakeCatalog(state) {
     contacts:state.contacts.filter(c=>state.customers.some(customer=>customer.id===c.customer_id&&!customer.shared)).map(c=>({id:c.id,customer_id:c.customer_id,name:c.name,title:c.title})),
     opportunities:state.opportunities.map(o=>({id:o.id,name:o.name,code:o.code,customer_id:o.customer_id,owner_id:o.owner_id,stage:o.stage,reference:o.reference})),
     contracts:state.contracts.map(c=>({id:c.id,name:c.name,contract_no:c.contract_no,code:c.code,customer_id:c.customer_id,outstanding:c.outstanding/100,items:c.items.map(i=>({id:i.id,name:i.name,kind:i.kind,amount:i.amount/100})),payments:c.payments.map(p=>({id:p.id,amount:p.amount/100,status:p.status}))})),
-    ...(state.actor.role==='admin'?{configuration:{documents:state.integrationSettings.documents},rules,performance:state.performance.map(p=>({user_id:p.user_id,name:p.name,month:p.month,status:p.status})),commission_previews:state.commission.previews.map(p=>({sales_id:p.sales_id,name:p.name,kind:p.kind,period:p.period,base:p.base/100,rate:p.rate,due:p.due/100})),commission_batches:state.commission.batches.map(b=>({id:b.id,sales_id:b.sales_id,kind:b.kind,period:b.period,amount:b.amount/100,status:b.status}))}:{}),
+    ...(state.actor.role==='admin'?{configuration:{documents:state.integrationSettings.documents},rules,performance:state.performance.map(p=>({user_id:p.user_id,name:p.name,month:p.month,status:p.status})),commission_previews:(state.commission.realtime_previews||[]).map(p=>({sales_id:p.sales_id,name:p.name,kind:p.kind,period:p.period,base:p.base/100,rate:p.rate,estimated_total:p.estimated_total==null?null:p.estimated_total/100,issues:p.issues,read_only:true})),commission_batches:state.commission.batches.map(b=>({id:b.id,sales_id:b.sales_id,kind:b.kind,period:b.period,amount:b.amount/100,status:b.status}))}:{}),
   }};
 }
 function resolveOperations(ctx, operations, state) {
@@ -92,11 +92,12 @@ function applyOperation(ctx,op,refs) {
   const def=definitions[op.type];assert(def,'不支持此数据类型');
   assert(!op.resolution_errors?.length,op.resolution_errors?.join('；'));
   assert(op.action!=='update'||def.table||def.suffix||['document_template','document_template_approve','rules','commission_confirm'].includes(op.type),'此记录类型不能直接修改，请提供正确的业务操作；禁止把更新当作新增');
+  assert(def.actionRoles[op.action]?.includes(ctx.actor.role),def.adminOnly?'此类资料仅管理员可录入或修改':'当前角色不能录入或修改此类资料',403);
   assert(op.type!=='contract_item'||op.action==='update','合同行项只能通过已有行项ID维护');
   assert(!op.target_id||op.action==='update'||def.suffix,'新增记录不能同时指定已有记录编号，请明确新增或修改');
   const data=structuredClone(op.data);
   assert(Object.keys(data).length,'文档没有需要写入的业务字段');
-  assert(Object.keys(data).every(key=>operationFields(op.type,op.action).includes(key)),'AI草稿包含当前操作不支持的字段，请重新识别资料');
+  assert(Object.keys(data).every(key=>operationFields(op.type,op.action,ctx.actor.role).includes(key)),'AI草稿包含当前角色或操作不支持的字段，请重新识别资料');
   for(const key of ['duplicate_ack','additional','active','performance_enabled','confirmed','both_stamped'])if(data[key]!==undefined)assert(typeof data[key]==='boolean',`${fieldNames[key]||key}须明确填写是或否`);
   for(const key of ['customer_id','opportunity_id','contract_id','owner_id','user_id','entity_id','collaborator_pm','sales_id']) if(data[key]!==undefined&&data[key]!==null&&data[key]!=='') {
     if(typeof data[key]==='string'&&data[key].startsWith('$')) {
@@ -121,7 +122,7 @@ function applyOperation(ctx,op,refs) {
   const missing=required.filter(key=>!hasValue(data[key]));
   assert(!missing.length,`文档缺少必填字段：${missing.map(key=>fieldNames[key]||key).join('、')}`);
   if(op.action==='create')for(const group of def.requiredAny||[])assert(group.some(key=>hasValue(data[key])),`文档缺少必填信息：${group.map(key=>fieldNames[key]||key).join('、')}至少一项`);
-  if(['customer','opportunity'].includes(op.type)&&ctx.actor.role==='sales'&&data.owner_id!==undefined)assert(data.owner_id===ctx.actor.id,'销售只能维护本人负责的记录，文档负责人须与当前账号一致',403);
+  if(['customer','opportunity','contract'].includes(op.type)&&ctx.actor.role==='sales'&&data.owner_id!==undefined)assert(data.owner_id===ctx.actor.id,'销售只能维护本人负责的记录，文档负责人须与当前账号一致',403);
   if(op.type==='contract'&&op.action!=='update') {
     assert(data.opportunity_id||data.customer_id,'文档缺少必填字段：关联商机或关联客户');
   }
@@ -133,17 +134,25 @@ function applyOperation(ctx,op,refs) {
     }
   }
   assert(intakeStorageMatches(ctx.db,op.type,data),'业务字段与当前数据库结构不一致，请联系管理员核对后重新识别');
-  if(op.type==='payment')assert(data.status==='已到账'?hasValue(data.pay_date):hasValue(data.promise_date),data.status==='已到账'?'文档缺少必填字段：实际到账日期':'文档缺少必填字段：承诺付款日');
+  if(op.type==='payment')assert(data.status==='已到账'?hasValue(data.pay_date):hasValue(data.promise_date),data.status==='已到账'?'文档缺少必填字段：实际到账日期':'文档缺少必填字段：预计收款日');
   if(['contract_attachment','contract_archive'].includes(op.type)) {
     const contractId=op.target_id||data.contract_id;
     assert(contractId,'请明确已有合同编号或本批合同引用');
     assert(!op.target_id||!data.contract_id||op.target_id===data.contract_id,'合同名称与归档编号不一致');
-    const files=(ctx.sourceFiles||[]).filter(f=>(f.name||f.filename)===data.source_file);
-    assert(files.length===1,'须选择本批唯一同名的原始合同附件');
-    const attachmentId=attachContractFile(ctx,contractId,files[0]);
+    let attachmentId=null;
+    if(hasValue(data.source_file)){
+      const files=(ctx.sourceFiles||[]).filter(f=>(f.name||f.filename)===data.source_file);
+      assert(files.length===1,'须选择本批唯一同名的原始合同附件');
+      attachmentId=attachContractFile(ctx,contractId,files[0]);
+    }else assert(op.type==='contract_archive','请提供要保存的合同附件');
     if(op.type==='contract_archive') {
-      assert(data.both_stamped===true,'请明确核对双方盖章后再归档');
-      const result=ctx.mutate(`/api/contracts/${contractId}/archive`,'POST',{both_stamped:true,archive_attachment_id:attachmentId},ctx.actor);
+      assert(data.both_stamped===true,'请明确确认合同已经签署');
+      const contract=ctx.scoped('contracts',contractId,ctx.actor);
+      // A freshly registered contract is already signed. A redundant explicit
+      // confirmation without a file must not fabricate an attachment or filing.
+      const result=contract.lifecycle==='已归档'&&!attachmentId
+        ?{id:contract.id,message:'合同已签署，附件可后补'}
+        :ctx.mutate(`/api/contracts/${contractId}/archive`,'POST',{both_stamped:true,...(attachmentId?{archive_attachment_id:attachmentId}:{})},ctx.actor);
       return {type:op.type,ref:op.ref,id:contractId,message:result.message,...(!ctx.previewOnly?{action:op.action,source_file:op.source_file,destinations:operationDestinations(ctx.db,op,data,contractId)}:{})};
     }
     return {type:op.type,ref:op.ref,id:attachmentId,message:'合同附件已保存',...(!ctx.previewOnly?{action:op.action,source_file:op.source_file,destinations:operationDestinations(ctx.db,op,data,attachmentId)}:{})};
@@ -158,11 +167,10 @@ function applyOperation(ctx,op,refs) {
   if(op.type==='document_template_approve') {assert(data.confirmed===true,'请明确批准已核对的公司模板');method='PATCH';body={documents:{confirmed:true}};}
   if(op.type==='rules')method='PATCH';
   if(op.type==='member'&&op.action==='create')body={...data,dingtalk_only:true};
-  if(op.type==='commission_confirm') {
-    const calculated=commissionPreview(ctx.db,ctx.getRules(),ctx.actor,data.period).previews.find(p=>p.sales_id===data.sales_id&&p.kind===data.kind);
-    assert(calculated,'提成对象无效');body={...data,fingerprint:calculated.fingerprint};
-    op.calculation={base:calculated.base/100,rate:calculated.rate,due:calculated.due/100,...(calculated.components?{components:calculated.components.map(c=>({...c,base:c.base/100,total:c.total/100}))}:{})};
-  }
+  // A user-supplied reason authorizes a correction of the current ledger, not
+  // a rewrite of an already confirmed settlement. The service still scopes
+  // every target to the sales member before accepting the correction.
+  if(canManageContractData(ctx.actor)&&hasValue(data.reason)&&((op.type==='contract'&&op.action==='update')||['contract_item','payment_allocation'].includes(op.type)))body={...body,data_correction:true};
   const result=ctx.mutate(path,method,body,ctx.actor);
   if(result?.id)refs.set(op.ref,{id:result.id,type:op.type});
   const id=result?.id||op.target_id||null;

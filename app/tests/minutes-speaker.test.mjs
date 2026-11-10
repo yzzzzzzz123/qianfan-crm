@@ -118,6 +118,6 @@ test('质检仅使用本条可用正文，明确摘要/截断范围，空响应�
  const input=qualityInput({transcript:{state:'ready',content:'原文内容'.repeat(8000)},summary:{state:'ready',content:'不混入的摘要'}});
  assert.equal(input.messages[1].content.includes('不混入的摘要'),false);assert.equal(JSON.parse(input.messages[1].content).truncated,true);
  await assert.rejects(analyzeQuality(input,async()=>''));assert.equal((await analyzeQuality(qualityInput({}),async()=>{assert.fail('no source must not call AI');})).state,'empty');
- const complete=createQualityComplete({env:{PPIO_API_KEY:'isolated-key'},fetcher:async()=>({ok:true,json:async()=>({choices:[{finish_reason:'length',message:{content:'截断结果'}}]})})});
+ const complete=createQualityComplete({env:{AI_API_KEY:'isolated-key'},fetcher:async()=>({ok:true,json:async()=>({choices:[{finish_reason:'length',message:{content:'截断结果'}}]})})});
  await assert.rejects(complete(input.messages),/未完整返回/);
 });

@@ -40,7 +40,7 @@ test('真实来源和AI回执按实际业务类型合并最近入库，合同不
   assert.equal(dates(state.ai.importHistory).customer,'2026-10-20T02:00:00Z');
   assert.match(guideRow(state,'contracts'),/2026\/10\/25 10:00:00/);
   assert.match(guideRow(state,'payments'),/2026\/10\/24 10:00:00/);
-  assert.match(guideRow(state,'contracts'),/已有或本批新建合同/);
+  assert.match(guideRow(state,'contracts'),/已有草稿|明确合同引用/);
   const imported=(await f.request('/source-records?sheet='+encodeURIComponent('项目回款计划'),{actor:admin})).body;
   assert.equal(imported.records.length,1);assert.ok(imported.records[0].imported_at);
 });

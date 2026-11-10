@@ -27,7 +27,7 @@ export function operationDestinations(db,op,data,id) {
   if(['activity','quote'].includes(op.type))Object.assign(record,{record_label:op.type==='quote'?'报价 #'+id:row.summary,detail_action:'opportunity',detail_id:row.opportunity_id});
   if(op.type==='contract'||op.type==='contract_archive') {
     Object.assign(record,{detail_action:'contract',detail_id:id});
-    const lines=all(db,'SELECT id,name FROM contract_items WHERE contract_id=? ORDER BY id',id);
+    const lines=all(db,'SELECT id,name FROM contract_items WHERE retired_at IS NULL AND contract_id=? ORDER BY id',id);
     record.related_records=lines.map(line=>({table:'contract_items',record_id:line.id,record_label:line.name}));
   }
   if(op.type==='contract_attachment')Object.assign(record,{record_label:row.filename,detail_action:'contract',detail_id:row.entity_id});

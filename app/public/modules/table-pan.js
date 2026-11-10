@@ -1,12 +1,16 @@
 // One shared controller for every horizontally scrollable business table.
 export function installTablePanning(doc=document){
- const win=doc.defaultView;let drag=null,blockedClick=null,active=null,frame=0,syncing=false;
+ const win=doc.defaultView,watchedAnimations=new WeakSet();let drag=null,blockedClick=null,active=null,frame=0,syncing=false;
  const bar=doc.createElement('div');bar.className='viewport-table-scroll';bar.hidden=true;bar.setAttribute('aria-label','左右查看表格字段');bar.tabIndex=0;
  const track=doc.createElement('div');bar.append(track);doc.body.append(bar);
  const schedule=()=>{if(!frame)frame=win.requestAnimationFrame(update);};
  function update(){
   frame=0;
   const modal=doc.querySelector('dialog[open]'),scope=modal||doc.querySelector('#content')||doc;
+  // A transforming drawer temporarily becomes the fixed bar's containing
+  // block. Wait for its own opening animation before measuring coordinates.
+  const opening=modal?.getAnimations?.().filter(animation=>animation.playState==='running')||[];
+  if(opening.length){active=null;bar.hidden=true;for(const animation of opening)if(!watchedAnimations.has(animation)){watchedAnimations.add(animation);animation.finished.then(schedule,schedule);}return;}
   const candidates=[...scope.querySelectorAll('.table-scroll')].map(el=>({el,rect:el.getBoundingClientRect()})).filter(({el,rect})=>el.scrollWidth>el.clientWidth+2&&rect.width>0&&rect.top<win.innerHeight-80&&rect.bottom>100);
   candidates.sort((a,b)=>Math.abs(Math.max(80,a.rect.top)-win.innerHeight/3)-Math.abs(Math.max(80,b.rect.top)-win.innerHeight/3));
   const chosen=candidates[0];active=chosen?.el||null;bar.hidden=!active;

@@ -10,7 +10,7 @@ test('AI字段指南按实际角色及新增修改字段区分，不给PM展示�
   assert.equal(contract.action,'update');assert.deepEqual(contract.required,[]);
   assert.deepEqual(contract.optional,['scope','project_status','delivery_staff','project_note']);
   for(const field of ['owner_id','renewal_tag','payment_type','sale_type','order_type'])assert.ok(!contract.optional.includes(field),field);
-  assert.ok(!visibleGuideGroups('sales').flatMap(g=>g.types).includes('contract'));
+  assert.ok(visibleGuideGroups('sales').flatMap(g=>g.types).includes('contract'));
   assert.ok(guideFields('contact').update.includes('active'));
   assert.ok(!guideFields('contact').update.includes('customer_id'));
 });

@@ -12,7 +12,7 @@ import {createHash,randomUUID} from 'node:crypto';
 //   --deployment local --apply --expect customers=N,opportunities=N,contracts=N,payments=N
 const appRoot=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const projectRoot=path.dirname(appRoot);
-const removeTables=['commission_lines','commission_batches','contract_attachment_analyses','payments','contract_items','contracts','activity_events','activities','quotes','stage_history','opportunities'];
+const removeTables=['commission_lines','commission_batches','record_recycle_bin','payment_plan_links','contract_exit_requests','contract_attachment_analyses','payments','contract_expenses','contract_items','contracts','activity_events','activities','quotes','stage_history','opportunities'];
 const entities={opportunity:'opportunities',activity:'activities',quote:'quotes',contract:'contracts',contract_archive:'contracts',contract_item:'contract_items',payment:'payments',payment_receive:'payments',payment_allocation:'payments',payment_checkpoint:'payments',attachment:'attachments',contract_attachment:'attachments',commission:'commission_batches',commission_confirm:'commission_batches',commission_pay:'commission_batches'};
 const attachmentEntities=new Set(['opportunity','activity','quote','contract','contract_item','payment','commission']);
 const resetMark='[本地销售数据已清理]';
@@ -58,7 +58,7 @@ function referencesDeleted(value,ids){
  const table=entities[value.type]||entities[value.entity]||value.table||value.table_name;
  if(table&&['id','target_id','entity_id','record_id','detail_id'].some(key=>inSet(ids,table,value[key])))return true;
  if(value.type==='contract_attachment'&&inSet(ids,'contracts',value.target_id))return true;
- for(const [key,target] of Object.entries({opportunity_id:'opportunities',contract_id:'contracts',payment_id:'payments',item_id:'contract_items',activity_id:'activities',quote_id:'quotes',attachment_id:'attachments',archive_attachment_id:'attachments'}))if(inSet(ids,target,value[key]))return true;
+ for(const [key,target] of Object.entries({opportunity_id:'opportunities',contract_id:'contracts',payment_id:'payments',plan_id:'payments',receipt_id:'payments',item_id:'contract_items',activity_id:'activities',quote_id:'quotes',attachment_id:'attachments',archive_attachment_id:'attachments'}))if(inSet(ids,target,value[key]))return true;
  const intent={convert:'opportunities','edit-opportunity':'opportunities','new-activity':'opportunities','new-quote':'opportunities','edit-contract':'contracts','new-payment':'contracts','edit-item':'contract_items','receive-payment':'payments','payment-checkpoint':'payments','payment-allocation':'payments','commission-pay':'commission_batches'}[value.intent];
  if(intent&&inSet(ids,intent,value.id))return true;
  return Object.values(value).some(child=>child&&typeof child==='object'&&referencesDeleted(child,ids));

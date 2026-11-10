@@ -55,23 +55,26 @@ test("M11-A04 各业务模块支持手动填写新建，文档上传统一保留
   ])
     {const html=formContent(s,type,id);assert.ok(html.includes(`data-form="${type}"`),type);assert.doesNotMatch(html,/type="file"|type="password"/,type);}
   assert.match(renderPage(s,{view:'intake'}),/data-form="ai-intake"/);
-  for(const view of ['analytics','customers','opportunities','activities','contracts','collections'])assert.match(renderPage(s,{view,tab:'members'}),/data-action="manual-entry"/,view);
+  for(const view of ['analytics','customers','opportunities','activities'])assert.match(renderPage(s,{view,tab:'members'}),/data-action="manual-entry"/,view);
+  assert.match(renderPage(s,{view:'contracts'}),/data-action="new-contract"/);
+  assert.match(renderPage(s,{view:'collections'}),/data-action="new-payment"/);
+  assert.match(renderPage(s,{view:'collections'}),/data-action="new-payment-plan"/);
   for(const view of ['team'])assert.doesNotMatch(renderPage(s,{view,tab:'members'}),/data-action="manual-entry"|data-action="new-user"/,view);
   assert.doesNotMatch(formContent(s,'user',''),/data-form="user"|name="ding_user_id"|name="username"/);
   for(const view of Object.keys(pages))assert.doesNotMatch(renderPage(s,{view,tab:'members'}),/data-action="mirror-import"/);
   assert.match(formContent(s,'edit-customer',1),/资料统一交给AI接收/);
 });
-test("M11-A05 销售界面拒绝管理页面，合同详情不提供回款和改判入口", async (t) => {
+test("M11-A05 销售可编辑本人合同及回款，管理页面和归档仍受限", async (t) => {
   const f = await fixture(t);
   const actor = await f.login(2);
   const s = (await f.request("/state", { actor })).body;
   for (const view of ["analytics", "audit"])
     assert.match(renderPage(s, { view }), /无权访问/);
   const html = contractDetail(s, 1);
-  assert.match(html, /合同资料只读/);
+  assert.match(html, /data-action="contract-maintain"/);
   assert.doesNotMatch(
     html,
-    /data-action="(?:new-payment|edit-item|edit-contract|receive-payment|collection-receive|contract-maintain|item-margin|payment-plan)"/,
+    /data-action="(?:data-review|settlement-review)"/,
   );
 });
 
@@ -129,7 +132,7 @@ test('同一记录保留唯一操作，行级设置不再叠加页面入口',asy
   assert.match(renderPage(s,{view:'performance'}),/data-action="performance-review"/);
   assert.doesNotMatch(renderPage(s,{view:'team'}),/data-action="target" data-id=""/);
   const customerForm=formContent(s,'customer','');
-  assert.equal((customerForm.match(/data-action="close"/g)||[]).length,1);
+  assert.equal((customerForm.match(/data-action="close"/g)||[]).length,2);
   assert.doesNotMatch(contractDetail(s,1),/data-action="(?:edit-item|receive-payment)"/);
   assert.doesNotMatch(opportunityDetail({...s,activities:[]},1),/data-action="new-activity"[^]*data-action="new-activity"/);
   assert.doesNotMatch(formContent({...s,customers:[]},'opportunity',''),/<form|type="submit"/);
