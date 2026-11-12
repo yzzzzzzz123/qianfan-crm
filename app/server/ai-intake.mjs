@@ -4,8 +4,10 @@ import { createHash } from 'node:crypto';
 import { AppError, assert, text, cents, validDate } from './domain.mjs';
 import {schemaForAI} from '../public/modules/intake-schema.js';
 
-export const AI_MODEL='deepseek-v4-1-flash';
-export const AI_ENDPOINT='https://aiclub.zimaocloud.com/model/openApi/v1/chat/completions';
+const serverPPIO=process.env.CRM_RUNTIME_ENVIRONMENT==='server'&&process.env.CRM_AI_PROVIDER==='ppio';
+export const AI_MODEL=serverPPIO?'qwen/qwen3.8-max':'deepseek-v4-1-flash';
+export const AI_ENDPOINT=serverPPIO?'https://api.ppio.com/openai/v1/chat/completions':'https://aiclub.zimaocloud.com/model/openApi/v1/chat/completions';
+export const AI_REQUEST_OPTIONS=serverPPIO?{reasoning_effort:'none'}:{thinking:{type:'disabled'}};
 const parser=fileURLToPath(new URL('../scripts/extract-upload.py',import.meta.url));
 export const inputHash=b=>createHash('sha256').update(JSON.stringify({text:b.text||'',files:(b.files||[]).map(f=>createHash('sha256').update(Buffer.from(f.base64,'base64')).digest('hex')).sort(),context:b.context||{}})).digest('hex');
 export function relevantCatalog(records,sources,note,context={}) {
@@ -125,7 +127,7 @@ export function createIntakeAI({env=process.env,fetcher=fetch,fileParser=extract
       const message={today:catalog.today,actor:catalog.actor,instruction:note,context:b.context||{},authorized_catalog:relevantCatalog(catalog.records,sources,note,b.context),catalog_note:'目录仅包含与原文明确相关的已有记录。其他对象可用准确全称关联，服务器会在完整授权目录内匹配；不能猜已有编号。',uploaded_sources:sources};
       parts.unshift({type:'text',text:JSON.stringify(message)});
       let response;
-      try {response=await fetcher(AI_ENDPOINT,{method:'POST',headers:{Authorization:'Bearer '+key,'Content-Type':'application/json'},body:JSON.stringify({model:AI_MODEL,messages:[{role:'system',content:AI_SYSTEM},{role:'user',content:parts}],temperature:0,max_tokens:32768,response_format:{type:'json_object'},thinking:{type:'disabled'},stream:false}),signal:AbortSignal.timeout(180000),redirect:'error'});} catch {throw new AppError('AI 服务连接超时或不可用，资料尚未入库，请重试',502);}
+      try {response=await fetcher(AI_ENDPOINT,{method:'POST',headers:{Authorization:'Bearer '+key,'Content-Type':'application/json'},body:JSON.stringify({model:AI_MODEL,messages:[{role:'system',content:AI_SYSTEM},{role:'user',content:parts}],temperature:0,max_tokens:32768,response_format:{type:'json_object'},...AI_REQUEST_OPTIONS,stream:false}),signal:AbortSignal.timeout(180000),redirect:'error'});} catch {throw new AppError('AI 服务连接超时或不可用，资料尚未入库，请重试',502);}
       if(!response.ok) throw new AppError(`AI 服务请求失败（HTTP ${response.status}），资料尚未入库`,502);
       let result;
       try {result=await response.json();}catch{throw new AppError('AI服务响应格式无效，资料尚未入库',502);}
@@ -148,7 +150,7 @@ export function createIntakeAI({env=process.env,fetcher=fetch,fileParser=extract
       const parts=[{type:'text',text:JSON.stringify({filename:file.name,original_text:parsed.text})},...parsed.images.map(image=>({type:'image_url',image_url:{url:`data:${image.mime};base64,${image.base64}`}}))];
       let response,result;
       try{
-        response=await fetcher(AI_ENDPOINT,{method:'POST',headers:{Authorization:'Bearer '+key,'Content-Type':'application/json'},body:JSON.stringify({model:AI_MODEL,messages:[{role:'system',content:CONTRACT_EXTRACTION_SYSTEM},{role:'user',content:parts}],temperature:0,max_tokens:12000,response_format:{type:'json_object'},thinking:{type:'disabled'},stream:false}),signal:AbortSignal.timeout(180000),redirect:'error'});
+        response=await fetcher(AI_ENDPOINT,{method:'POST',headers:{Authorization:'Bearer '+key,'Content-Type':'application/json'},body:JSON.stringify({model:AI_MODEL,messages:[{role:'system',content:CONTRACT_EXTRACTION_SYSTEM},{role:'user',content:parts}],temperature:0,max_tokens:12000,response_format:{type:'json_object'},...AI_REQUEST_OPTIONS,stream:false}),signal:AbortSignal.timeout(180000),redirect:'error'});
         if(!response.ok)throw new Error();result=await response.json();
       }catch{throw new AppError('合同附件AI读取失败，请稍后重试；未修改合同或回款记录',502);}
       const choice=result.choices?.[0];assert(choice?.finish_reason==='stop','合同附件AI输出未完成，请拆分后重试',502);

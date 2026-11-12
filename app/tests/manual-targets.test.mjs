@@ -33,14 +33,14 @@ test('历史季度存在已确认绩效时列表带锁定月份，服务端拒�
   assert.equal(one(f.db,"SELECT snapshot FROM performance_reviews WHERE user_id=2 AND month='2025-10'").snapshot,before);
 });
 
-test('季度目标在团队逐人设置，绩效跳转团队且不重复录入入口，AI字段列表不含目标',async t=>{
+test('季度目标在团队逐人设置，绩效入口携带人员月份与对应季度，AI字段列表不含目标',async t=>{
   const f=await fixture(t),admin=await f.login(1),sales=await f.login(2),s=(await f.request('/state',{actor:admin})).body;
   const form=formContent(s,'target',2,'2027Q3');assert.match(form,/data-form="target"/);assert.match(form,/name="user_id"/);assert.match(form,/value="2027Q3"/);assert.match(form,/name="amount"/);
   assert.doesNotMatch(form,/AI接收|name="text"/);
   const team=renderPage(s,{view:'team'}),performance=renderPage(s,{view:'performance'});
   assert.match(team,/class="panel target-settings"/);assert.match(team,/data-action="target" data-id="2"/);
   assert.doesNotMatch(team,/data-action="target" data-id=""/);
-  assert.match(performance,/href="#team">季度目标<\/a>/);assert.doesNotMatch(performance,/data-action="target"/);
+  assert.match(performance,/data-action="performance-target" data-id="2" data-month="[0-9]{4}-[0-9]{2}" data-quarter="[0-9]{4}Q[1-4]"/);assert.doesNotMatch(performance,/href="#team">季度目标<\/a>/);
   assert.doesNotMatch(renderPage(s,{view:'intake'}),/data-guide="targets"/);
-  const own=(await f.request('/state',{actor:sales})).body;assert.match(formContent(own,'target',2),/无权设置/);assert.doesNotMatch(renderPage(own,{view:'performance'}),/data-action="target"/);
+  const own=(await f.request('/state',{actor:sales})).body;assert.match(formContent(own,'target',2),/无权设置/);assert.doesNotMatch(renderPage(own,{view:'performance'}),/data-action="(?:target|performance-target)"/);
 });

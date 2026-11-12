@@ -89,7 +89,7 @@ export const riskBadge = (o) =>
       : badge(o.risk.label, o.risk.level === "critical" ? "danger" : "warning");
 export const aiDataActions=new Set(['new-customer','edit-customer','new-contact','edit-contact','new-opportunity','edit-opportunity','new-activity','new-quote','new-contract','convert','new-payment','edit-contract','edit-item','receive-payment','new-user','edit-rules','commission-pay','payment-checkpoint','edit-finance-rules','edit-user-mapping','edit-document-templates','bulk-targets','toggle-user']);
 const manualNewActions=new Set(['new-customer','new-contact','new-opportunity','new-activity','new-quote','new-contract','new-payment','new-user','convert']);
-const manualRecordActions=new Set(['commission-pay']);
+const manualRecordActions=new Set(['commission-pay','edit-customer','edit-contact','edit-opportunity']);
 export const actionButton = (
   label,
   action,

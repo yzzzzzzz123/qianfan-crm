@@ -98,7 +98,7 @@ test('手动等级支持自定义选项，不恢复退役旧等级；最终绩�
   await f.review();const s=await f.state(),p=s.performance.find(p=>p.user_id===2);
   assert.equal(p.final_score,80);assert.equal(p.total,80);assert.equal(p.grade,'B');assert.equal(p.status,'confirmed');assert.notEqual(p.automatic_total,80);
   assert.equal((await f.request('/performance/review',{actor:f.admin,method:'POST',body:{user_id:2,month:'2026-11',final_score:90,reason:'不能改锁定月份'}})).status,409);
-  assert.match(renderPage(s,{view:'customers'}),/重点客户/);assert.match(formContent(s,'customer-level',f.customerId),/手动等级/);
+  assert.match(renderPage(s,{view:'customers'}),/重点客户/);assert.match(formContent(s,'customer-level',f.customerId),/客户等级/);
 });
 
 test('对客报价跟进计分，同商机同日报价资料与跟进不重复计分',()=>{

@@ -69,10 +69,11 @@ export function createApp({
         if (["POST", "PATCH", "PUT", "DELETE"].includes(req.method)) {
           let chunks = [];
           let length = 0;
+          const upload = url.pathname === '/api/quotes' || /^\/api\/contracts\/\d+\/(attachments|archive)$/.test(url.pathname);
+          const maxLength = url.pathname === '/api/ai/intake' ? 30*1024*1024 : upload ? 16*1024*1024 : 1000000;
           for await (const chunk of req) {
             length += chunk.length;
-            const upload=/^\/api\/contracts\/\d+\/(attachments|archive)$/.test(url.pathname);
-            if (length > (url.pathname==='/api/ai/intake'?30*1024*1024:upload?16*1024*1024:1000000)) throw new AppError("提交内容过大", 413);
+            if (length > maxLength) throw new AppError("提交内容过大", 413);
             chunks.push(chunk);
           }
           try {

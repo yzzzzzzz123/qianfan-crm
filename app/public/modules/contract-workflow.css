@@ -62,6 +62,7 @@
 .workflow-more[open]{display:flex;flex-wrap:wrap}.workflow-more[open] .btn{display:block}
 .workflow-closed-plans{margin-top:16px}.workflow-closed-plans>summary{font-size:13px;color:var(--secondary);padding:10px 0;cursor:pointer}
 .workflow-receipt{border-bottom:1px solid var(--line);padding:19px 0}.workflow-receipt:last-child{border-bottom:0}
+.workflow-receipt:focus{outline:2px solid var(--sail);outline-offset:4px;border-radius:6px}
 .workflow-receipt p{margin-top:6px;font-size:13px}.workflow-receipt small,.workflow-record-note{font-size:12px;color:var(--secondary);line-height:1.7}
 .workflow-allocation{display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-size:13px;margin:8px 0}
 .workflow-notice{padding:13px 16px;background:#edf5ff;border:1px solid #d8e8fb;color:#315d86;border-radius:8px;font-size:13px;line-height:1.8;margin:12px 0}

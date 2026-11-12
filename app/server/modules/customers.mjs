@@ -1,8 +1,40 @@
-import { assert, text, choice, now, similarCustomer, validDate } from "../domain.mjs";
+import {createHash} from 'node:crypto';
+import { assert, text, choice, now, today, similarCustomer, validDate } from "../domain.mjs";
 import { one, run } from "../database.mjs";
 import { all } from "../database.mjs";
-import { assertOwnershipUnlocked } from "./incentives.mjs";
+import { assertOwnershipUnlocked, contractLocks } from "./incentives.mjs";
 import {normalizeCompanyName,normalizeCreditCode,assertCustomerIdentityUnique} from '../company-profile.mjs';
+
+function hasSignedContract(db, customerId) {
+  return !!one(db,"SELECT id FROM contracts WHERE customer_id=? AND retired_at IS NULL AND terminated_at IS NULL AND lifecycle!='草稿' LIMIT 1",customerId);
+}
+
+function contactDate(value) {
+  const date=validDate(value,'最近触达日期',true);
+  assert(!date||date<=today(),'最近触达日期不能晚于今天');
+  return date;
+}
+
+// A handover changes future account maintenance by default. Financial ownership
+// may move only after the current affected records have been previewed explicitly.
+export function readCustomerTransfer({db,admin,scoped,owner},actor,id,params) {
+  admin(actor);
+  const customer=scoped('customers',id,actor);
+  const requested=params?.get?params.get('owner_id'):params?.owner_id;
+  assert(requested!==null&&requested!==undefined&&String(requested).trim()!==''&&Number.isSafeInteger(Number(requested))&&Number(requested)>0,'请选择新的客户负责人');
+  const nextId=owner(requested,actor);
+  assert(nextId!==customer.owner_id,'请选择与当前不同的客户负责人');
+  const opportunities=all(db,'SELECT id,name,stage,owner_id,updated_at FROM opportunities WHERE archived_at IS NULL AND customer_id=? AND owner_id IS ? ORDER BY id',customer.id,customer.owner_id);
+  const contracts=all(db,'SELECT id,name,contract_no,lifecycle,owner_id,amount,terminated_at FROM contracts WHERE retired_at IS NULL AND customer_id=? AND owner_id IS ? ORDER BY id',customer.id,customer.owner_id).map(contract=>{
+    const locks=contractLocks(db,contract.id);
+    const collected=one(db,"SELECT COALESCE(SUM(amount),0) amount FROM payments WHERE contract_id=? AND status='已到账'",contract.id).amount;
+    return {...contract,collected,locked:locks.ownership,lock_message:locks.message,locked_periods:locks.periods,locked_performance_months:locks.performance_months};
+  });
+  const result={customer_id:customer.id,from_owner:{id:customer.owner_id,name:one(db,'SELECT name FROM users WHERE id=?',customer.owner_id)?.name||'未分配'},to_owner:{id:nextId,name:one(db,'SELECT name FROM users WHERE id=?',nextId).name},
+    opportunities,contracts,totals:{opportunities:opportunities.length,contracts:contracts.length,contract_amount:contracts.reduce((sum,c)=>sum+c.amount,0),collected:contracts.reduce((sum,c)=>sum+c.collected,0)},can_transfer_linked:!contracts.some(c=>c.locked)};
+  result.preview_token=createHash('sha256').update(JSON.stringify({customer,...result})).digest('hex');
+  return result;
+}
 
 /** customers: unmatched routes return undefined; transaction and idempotency are owned by service.mjs. */
 export function handleCustomers(context) {
@@ -31,7 +63,7 @@ export function handleCustomers(context) {
     }
     if (b.role !== undefined) row.role = choice(b.role,['决策人','影响者','使用人','把关人','我方PM'],'角色');
     if (b.attitude !== undefined) row.attitude = choice(b.attitude,['支持','中立','反对'],'态度');
-    if (b.last_contact !== undefined) row.last_contact = validDate(b.last_contact,'最近触达日期',true);
+    if (b.last_contact !== undefined) row.last_contact = contactDate(b.last_contact);
     if(['phone','wechat','dingtalk'].some(k=>b[k]!==undefined))assert(['phone','wechat','dingtalk'].some(k=>String(row[k]??contact[k]??'').trim()),'请至少保留电话、微信或钉钉中的一种联系方式');
     if (b.active !== undefined) {
       assert([true,false,'true','false'].includes(b.active),'联系人状态无效');
@@ -39,7 +71,7 @@ export function handleCustomers(context) {
     }
     assert(Object.keys(row).length,'没有可更新内容');
     update('contacts',contact.id,row);
-    audit(actor,'更新联系人','customer',contact.customer_id,{contact_id:contact.id,before:contact,after:row});
+    audit(actor,'更新联系人','customer',contact.customer_id,{contact_id:contact.id,fields:Object.keys(row),before:Object.fromEntries(Object.keys(row).map(k=>[k,contact[k]])),after:row});
     return {id:contact.id,message:row.archived_at?'联系人已停用，历史资料保留':'联系人已更新'};
   }
   if (path === "/api/customers" && method === "POST") {
@@ -137,39 +169,50 @@ export function handleCustomers(context) {
     if(b.manual_level!==undefined)row.manual_level=b.manual_level===''||b.manual_level===null?null:choice(b.manual_level,[...getRules().customer_levels,...(c.manual_level?[c.manual_level]:[])],'手动客户等级');
     if (b.status !== undefined)
       row.status = choice(b.status, ["潜在", "成交", "流失", "冻结"], "状态");
+    if (b.management_status !== undefined) {
+      const management=choice(b.management_status,['正常','流失','冻结'],'客户管理状态');
+      row.status=management==='正常'?(hasSignedContract(db,c.id)?'成交':'潜在'):management;
+    }
+    let transfer=null;
     const preservesMissingOwner=c.owner_id===null&&(b.owner_id===null||b.owner_id==='');
+    if((b.ownership_scope==='linked_records'||Object.hasOwn(b,'transfer_preview_token'))&&b.owner_id!==undefined&&Number(b.owner_id)===c.owner_id)
+      assert(false,'客户负责人已变化或未选择新的负责人，请刷新移交预览后重试',409);
     if (b.owner_id !== undefined && !preservesMissingOwner && Number(b.owner_id) !== c.owner_id) {
       admin(actor);
       text(b.reason, "归属调整原因", 500);
       row.owner_id = owner(b.owner_id, actor);
-      for(const contract of all(db,'SELECT id FROM contracts WHERE retired_at IS NULL AND customer_id=? AND owner_id IS ?',c.id,c.owner_id)) assertOwnershipUnlocked(db,contract.id);
-      run(
-        db,
-        "UPDATE opportunities SET owner_id=?,updated_at=? WHERE customer_id=? AND owner_id IS ?",
-        row.owner_id,
-        now(),
-        c.id,
-        c.owner_id,
-      );
-      run(
-        db,
-        "UPDATE contracts SET owner_id=? WHERE customer_id=? AND owner_id IS ?",
-        row.owner_id,
-        c.id,
-        c.owner_id,
-      );
+      const scope=choice(b.ownership_scope??'customer_only',['customer_only','linked_records'],'客户移交范围');
+      const preview=readCustomerTransfer(context,actor,c.id,{owner_id:row.owner_id});
+      if(scope==='linked_records'||Object.hasOwn(b,'transfer_preview_token'))
+        assert(typeof b.transfer_preview_token==='string'&&b.transfer_preview_token===preview.preview_token,'客户或关联业务已变化，请刷新移交预览后重试',409);
+      transfer={scope,from_owner_id:c.owner_id,to_owner_id:row.owner_id,opportunity_ids:[],contract_ids:[],collected:0};
+      if(scope==='linked_records') {
+        assert(b.ownership_confirmed===true,'请核对影响预览并明确确认调整关联业务归属');
+        for(const contract of preview.contracts)assertOwnershipUnlocked(db,contract.id);
+        run(db,'UPDATE opportunities SET owner_id=?,updated_at=? WHERE archived_at IS NULL AND customer_id=? AND owner_id IS ?',row.owner_id,now(),c.id,c.owner_id);
+        run(db,'UPDATE contracts SET owner_id=? WHERE retired_at IS NULL AND customer_id=? AND owner_id IS ?',row.owner_id,c.id,c.owner_id);
+        transfer={...transfer,opportunity_ids:preview.opportunities.map(o=>o.id),contract_ids:preview.contracts.map(c=>c.id),collected:preview.totals.collected};
+      }
     }
+    let collaborationChange=null;
     if(b.collaborators!==undefined) {
       admin(actor);assert(Array.isArray(b.collaborators)&&b.collaborators.length<=30,'协作成员无效');
+      const before=all(db,'SELECT user_id FROM customer_collaborators WHERE customer_id=? ORDER BY user_id',c.id).map(x=>x.user_id);
+      const after=[...new Set(b.collaborators.map(Number))].sort((a,b)=>a-b);
       run(db,'DELETE FROM customer_collaborators WHERE customer_id=?',c.id);
-      for(const uid of new Set(b.collaborators.map(Number))) {assert(one(db,'SELECT id FROM users WHERE id=? AND active=1 AND business_member=1 AND developer_admin=0',uid),'协作成员不存在');run(db,'INSERT INTO customer_collaborators VALUES(?,?)',c.id,uid);}
+      for(const uid of after) {assert(one(db,'SELECT id FROM users WHERE id=? AND active=1 AND business_member=1 AND developer_admin=0',uid),'协作成员不存在');run(db,'INSERT INTO customer_collaborators VALUES(?,?)',c.id,uid);}
+      collaborationChange={before,after};
     }
     update("customers", c.id, row);
     audit(actor, "更新客户", "customer", c.id, {
       fields: Object.keys(row),
       reason: b.reason || "",
+      before:Object.fromEntries(Object.keys(row).map(k=>[k,c[k]])),
+      after:row,
+      ...(transfer?{ownership_transfer:transfer}:{}),
+      ...(collaborationChange?{collaborators:collaborationChange}:{}),
     });
-    return { id: c.id, message: "客户档案已更新" };
+    return { id: c.id, message:transfer?(transfer.scope==='linked_records'?'客户及已核对的关联业务归属已调整':'客户负责人已调整，原商机、合同及回款归属保持原状'):"客户档案已更新" };
   }
   if (path === "/api/contacts" && method === "POST") {
     const c = scoped("customers", b.customer_id, actor);
@@ -188,7 +231,7 @@ export function handleCustomers(context) {
       note: text(b.note || "", "备注", 1000, false),
       wechat:text(b.wechat||'','微信',100,false),
       dingtalk:text(b.dingtalk||'','钉钉',100,false),
-      last_contact:validDate(b.last_contact,'最近触达日期',true),
+      last_contact:contactDate(b.last_contact),
     });
     audit(actor, "添加联系人", "customer", c.id, { name: b.name });
     return { id, message: "联系人已添加" };

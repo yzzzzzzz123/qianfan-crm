@@ -87,6 +87,8 @@
 .commission-task-heading>span:not(.badge){color:var(--muted);font-size:11px}
 .commission-task-main>p{margin:9px 0 6px;font-size:12px;color:var(--secondary);line-height:1.8;overflow-wrap:anywhere}
 .commission-task-main>small{font-size:11px;color:var(--muted)}
+.commission-task-main>.commission-task-receipt,.commission-task-receipt+small{display:block;line-height:1.7;overflow-wrap:anywhere}
+.commission-task-main>.commission-task-receipt{color:var(--secondary)}
 .commission-queue-heading{display:flex;gap:8px;align-items:center;padding:16px 24px 10px;border-top:1px solid var(--line);font-size:13px;font-weight:600}
 .commission-task-main>.commission-task-impact{color:var(--orange);margin-top:4px}
 .commission-task-heading>strong{overflow-wrap:anywhere}
@@ -138,3 +140,8 @@
 .commission-current-amount{max-width:55%}
 .commission-current-amount>strong{overflow-wrap:anywhere}
 }
+
+.commission-receipt-total{display:flex;align-items:baseline;flex-wrap:wrap;gap:5px 12px;margin:0 20px 16px;padding:11px 14px;border:1px solid var(--line);border-radius:7px;background:var(--sheet);font-size:12px;color:var(--secondary)}
+.commission-receipt-total strong{font-size:17px;font-weight:600;color:var(--ink);font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.commission-receipt-total small{margin-left:auto;color:var(--muted);font-size:11px}
+@media(max-width:700px){.commission-receipt-total{margin:0 16px 14px;gap:5px 9px}.commission-receipt-total small{flex-basis:100%;margin-left:0}}

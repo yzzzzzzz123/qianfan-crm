@@ -2,6 +2,7 @@ import {createHash} from 'node:crypto';
 import {all} from '../database.mjs';
 import {allocate,bandFor} from '../sales-policy.mjs';
 import {receiptMarginLedger,RECEIPT_MARGIN_SCHEME,roundRate,isServiceItem} from './receipt-margins.mjs';
+import {commissionDiagnostic,createCommissionIssueRecorder,receiptDiagnosticDetails} from './commission-diagnostics.mjs';
 
 const sum=(rows,key)=>rows.reduce((s,r)=>s+(r[key]??0),0);
 const schemeOf=batch=>{try{return JSON.parse(batch.snapshot).scheme;}catch{return null;}};
@@ -41,7 +42,7 @@ export function salesCommissionPreviews(db,rules,actor,month,performanceFor,mana
     const groups=new Map();
     for(const row of bases){const key=`${row.component}:${row.item_id}:${row.contract_id}`;const prior=groups.get(key);if(prior)prior.base+=row.base;else groups.set(key,{...row});}
     const productBase=sum(bases.filter(l=>l.component==='product'),'base'),serviceBase=sum(bases.filter(l=>l.component==='service'),'base');
-    if(serviceBase>0&&(!policy.service_scope_confirmed||policy.service_aggregation!=='month'))issues.push('开发运维须确认按当月实际服务回款合计选档，当前规则范围尚未对齐');
+    if(!management&&serviceBase>0&&(!policy.service_scope_confirmed||policy.service_aggregation!=='month'))issues.push('开发运维须确认按当月实际服务回款合计选档，当前规则范围尚未对齐');
     if(!management&&!fixedGrade&&cash>0){
       if(!grade)issues.push('当月绩效等级尚未确定');
       if(performance.status!=='confirmed')issues.push('当月绩效尚未确认锁定，当前仅供试算');
@@ -57,8 +58,10 @@ export function salesCommissionPreviews(db,rules,actor,month,performanceFor,mana
     const contractIds=new Set(receipts.map(r=>r.contract_id));
     if(lockedLines.some(l=>l.kind===kind&&l.sales_id===user.id&&contractIds.has(l.contract_id)&&schemeOf(l)!==RECEIPT_MARGIN_SCHEME))issues.push('到账合同已有其他算法的历史结算，须核对避免重复计提');
     const lines=[];
+    const teamProductTotal=management?roundRate(productBase,teamRate):0;
     for(const component of ['product','service']){
-      const rate=component==='product'?productRate:serviceRate;let cumulative=0,allocated=0;
+      const rate=component==='product'?productRate:serviceRate;
+      let cumulative=management&&component==='service'?productBase:0,allocated=management&&component==='service'?teamProductTotal:0;
       for(const row of [...groups.values()].filter(r=>r.component===component)){
         cumulative+=row.base;const entitlement=rate===null?0:roundRate(cumulative,rate)-allocated;allocated+=entitlement;
         const prior=sum(lockedLines.filter(l=>l.sales_id===user.id&&l.kind===kind&&l.period===month&&l.component===component&&l.item_id===row.item_id),'amount');
@@ -69,13 +72,16 @@ export function salesCommissionPreviews(db,rules,actor,month,performanceFor,mana
     }
     // Each snapshot carries each receipt's commission and exact contract rate.
     for(const component of ['product','service']){
-      const rate=component==='product'?productRate:serviceRate;let cumulative=0,allocated=0;
+      const rate=component==='product'?productRate:serviceRate;
+      let cumulative=management&&component==='service'?productBase:0,allocated=management&&component==='service'?teamProductTotal:0;
       for(const row of evidence){const base=component==='product'?row.product_gross_margin:management?row.service_gross_margin:row.service_classification_confirmed?row.service_received:null;
         if(!row.allocation_valid||base===null||rate===null){row[component+'_commission']=null;continue;}
         cumulative+=base;const next=roundRate(cumulative,rate);row[component+'_commission']=next-allocated;allocated=next;
       }
     }
-    const productTotal=productRate===null?0:roundRate(productBase,productRate),serviceTotal=serviceRate===null?0:roundRate(serviceBase,serviceRate),total=productTotal+serviceTotal,due=total-confirmed;
+    const productTotal=management?teamProductTotal:productRate===null?0:roundRate(productBase,productRate);
+    const serviceTotal=management?roundRate(productBase+serviceBase,teamRate)-teamProductTotal:serviceRate===null?0:roundRate(serviceBase,serviceRate);
+    const total=productTotal+serviceTotal,due=total-confirmed;
     if(due<0||lines.some(l=>l.amount<0))issues.push('当前应计低于已确认金额，请核对差额');
     const components=[{type:'product',label:'产品回款毛利',basis:management?'其他销售当月产品实际到账 × 各合同有效产品毛利率':'当月产品实际到账 × 各合同有效产品毛利率，按毛利合计选档',received_amount:sum(receipts,'product_amount'),gross_margin:sum(receipts,'product_gross_margin'),base:productBase,rate:productRate,total:productTotal},
       {type:'service',label:management?'开发运维回款毛利':'开发运维回款',basis:management?'其他销售当月服务实际到账 × 合同服务毛利率':'当月定开、运维实际服务回款合计选档并计提',received_amount:sum(receipts,'service_received'),gross_margin:sum(receipts,'service_gross_margin'),base:serviceBase,rate:serviceRate,total:serviceTotal}];
@@ -86,6 +92,43 @@ export function salesCommissionPreviews(db,rules,actor,month,performanceFor,mana
     result.push({...input,name:user.name,base:productBase+serviceBase,base_is_composite:!management,rate:management?teamRate:0,received_amount:cash,product_margin_rate:rates.length===1?rates[0]:null,product_margin_rates_multiple:rates.length>1,total,paid:sum(locked.filter(b=>b.status==='paid'),'amount'),due,blocked:issues.length>0,scenarios,amount_pending:amountPending,fingerprint:createHash('sha256').update(JSON.stringify(input)).digest('hex')});
   }
   return result;
+}
+
+export function realtimeTeamCommissionPreview(preview) {
+  const contractIssues=[],notices=[];
+  const issue=createCommissionIssueRecorder(contractIssues,preview.sales_id);
+  const record=(row,code,message,details)=>issue({id:row.contract_id,name:row.contract_name},code,message,{responsible_id:row.sales_id,...details});
+  for(const claim of preview.source_claims)record(claim,'receipt_source_claim',claim.reason);
+  const evidence=preview.evidence.map(({diagnostics,...receipt})=>{
+    for(const diagnostic of diagnostics){
+      const code=diagnostic.code==='team_service_margin_missing'?'margin_missing':diagnostic.code;
+      record(receipt,code,diagnostic.message,receiptDiagnosticDetails(receipt,diagnostic,receipt.sign_date));
+    }
+    if(receipt.source_basis)record(receipt,'source_split','合同明细尚待补齐，当前仅按已核验来源暂算');
+    if(receipt.terminated_at)record(receipt,'contract_terminated','合同已终止，仍按保留的实际到账核对提成',{pending:false});
+    return receipt;
+  });
+  const pendingContracts=new Set(contractIssues.filter(i=>i.pending).map(i=>i.contract_id));
+  const partial=preview.amount_pending||pendingContracts.size>0;
+  const lines=preview.lines.map(line=>({...line,amount:line.entitlement,known:!partial,amount_pending:false,provisional:partial}));
+  const estimatedTotal=lines.length||!partial?preview.total:null;
+  const unpaid=estimatedTotal===null?null:estimatedTotal-preview.paid;
+  const components=preview.components.map(component=>{
+    const total=estimatedTotal===null?null:component.total;
+    return {...component,base:total===null?null:component.base,total,estimated_total:total,calculated_total:partial?null:total,
+      rate:estimatedTotal===null?null:component.rate,partial,amount_pending:total===null};
+  });
+  if(partial&&lines.length)notices.push(commissionDiagnostic({
+    code:'team_basis_incomplete',message:'部分回款毛利待补齐，当前金额按已知毛利暂算，补齐后可能调整档位',pending:false,
+  },{salesId:preview.sales_id}));
+  const issues=[...new Set([...contractIssues.map(i=>i.display_message),...notices.map(i=>i.message)])];
+  return {
+    ...preview,components,evidence,lines,contract_issues:contractIssues,notices,issues,
+    realtime:true,calculation_scope:'monthly-team-receipt-margin',blocked:false,partial,provisional:partial&&lines.length>0,
+    rate:estimatedTotal===null?null:preview.rate,total:estimatedTotal,estimated_total:estimatedTotal,calculated_total:partial?null:estimatedTotal,
+    historical_due:estimatedTotal===null?null:estimatedTotal-preview.confirmed,due:unpaid,unpaid_amount:unpaid,
+    pending_count:pendingContracts.size,issue_count:contractIssues.length+notices.length,rate_pending:partial,
+  };
 }
 
 export {realtimeSalesCommissionPreviews} from './realtime-sales-commissions.mjs';

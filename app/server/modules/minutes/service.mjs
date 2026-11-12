@@ -5,7 +5,7 @@ import {all,one,run,transaction} from '../../database.mjs';
 import {assert,now} from '../../domain.mjs';
 import {createMinutesClient,readSavedMinutesIdentity,readSavedMinutesProfiles} from './client.mjs';
 import {createDeviceFlow,safeAuthorizationUrl,publicAuthorizationError} from './device-flow.mjs';
-import {normalizeArtifacts,artifactKinds,missingArtifact} from './content.mjs';
+import {normalizeArtifacts,missingArtifact} from './content.mjs';
 import {fetchMinutesAudio,safeMinutesAudio} from './recordings.mjs';
 import {minutesIncrementalFrom,minutesSourceSchedule,minutesSchedulerIntervalMs} from './schedule.mjs';
 import {minutesDateRange} from './dates.mjs';
@@ -14,6 +14,8 @@ import {speakerPending} from './speaker.mjs';
 import {qualityInput,analyzeQuality,createQualityComplete} from './quality.mjs';
 import {createPersonalMinutesClient} from './personal-client.mjs';
 import {loadPersonalTokens} from './personal-oauth.mjs';
+import {minutesContentState,retryableCore,coreStateSql,minutesPageSize,minutesPageNumber} from './state.mjs';
+import {syncMinutesFollowup} from './followup.mjs';
 
 export function createMinutesService(db,{binary=process.env.CRM_MINUTES_BINARY||path.resolve('../.private/tools/dws',process.platform==='win32'?'dws.exe':'dws'),credentialRoot=process.env.CRM_MINUTES_CREDENTIAL_ROOT||path.resolve('../.private/minutes-accounts'),corpId=process.env.DINGTALK_CORP_ID,clientFactory,personalClientFactory=createPersonalMinutesClient,readPersonalTokens=loadPersonalTokens,beginDeviceFlow,resolveEmployeeIdentity,readSavedIdentity=readSavedMinutesIdentity,readSavedProfiles=readSavedMinutesProfiles,enabled=existsSync(binary),deployment='local',fetchImpl=fetch,activityTags={},qualityComplete=createQualityComplete()}={}) {
   assert(path.isAbsolute(binary)&&path.isAbsolute(credentialRoot),'听记连接器与凭据目录必须使用绝对路径',503);
@@ -28,7 +30,7 @@ export function createMinutesService(db,{binary=process.env.CRM_MINUTES_BINARY||
   const current=actor=>{const user=one(db,'SELECT * FROM users WHERE id=? AND active=1 AND business_member=1 AND developer_admin=0',actor?.id);assert(user&&['admin','sales'].includes(user.role),'当前账号不可访问钉钉听记',403);return {...user,...(actor?._operator_id?{_operator_id:actor._operator_id}:{})};};
   function binding(actor){current(actor);const row=one(db,'SELECT u.ding_user_id,d.union_id FROM users u JOIN ding_identities d ON d.user_id=u.id WHERE u.id=?',actor.id);assert(corpId&&row?.ding_user_id&&row?.union_id,'请先为当前成员核验企业钉钉身份',403);return {corpId,userId:row.ding_user_id,unionId:row.union_id};}
   function credential(key){assert(/^[a-f0-9-]{36}$/.test(key),'听记凭据目录无效',503);return path.join(credentialRoot,key);}
-  function source(actor,id,{own=false,connected=false}={}){const a=current(actor),row=one(db,'SELECT * FROM minutes_sources WHERE id=?',id);assert(row&&(a.role==='admin'&&!own||row.member_id===a.id),'听记账号不存在或不可访问',404);assert(one(db,'SELECT id FROM users WHERE id=? AND active=1 AND business_member=1 AND developer_admin=0',row.member_id),'听记账号归属成员已停用',403);if(connected)assert(row.connection_state==='connected','听记连接已停止，请本人重新授权',409);return row;}
+  function source(actor,id,{own=false,connected=false,read=false}={}){const a=current(actor),row=one(db,'SELECT * FROM minutes_sources WHERE id=?',id);assert(row&&(a.role==='admin'&&!own||row.member_id===a.id),'听记账号不存在或不可访问',404);assert(read&&a.role==='admin'||one(db,'SELECT id FROM users WHERE id=? AND active=1 AND business_member=1 AND developer_admin=0',row.member_id),'听记账号归属成员已停用，仅可由管理员查阅已有档案',403);if(connected)assert(row.connection_state==='connected','听记连接已停止，请本人重新授权',409);return row;}
   const personal=(key,memberId)=>personalClientFactory({credentialDir:credential(key),memberId,authorizationKey:key});
   const client=s=>s.provider==='personal_mcp'?personal(s.credential_key,s.member_id):clientFactory({...s,corpId:s.corp_id,userId:s.user_id,profile:s.corp_id+':'+s.user_id,credentialDir:credential(s.credential_key)});
   function recordSource(actor,r){current(actor);const s=one(db,'SELECT * FROM minutes_sources WHERE id=?',r.source_id);assert(s?.connection_state==='connected','听记连接已停止，请本人重新授权',409);assert(one(db,'SELECT id FROM users WHERE id=? AND active=1 AND business_member=1 AND developer_admin=0',s.member_id),'听记账号归属成员已停用',403);return s;}
@@ -38,7 +40,7 @@ export function createMinutesService(db,{binary=process.env.CRM_MINUTES_BINARY||
     if(customerId){const c=one(db,'SELECT * FROM customers WHERE id=?',customerId);assert(c&&(a.role==='admin'||c.owner_id===a.id||one(db,'SELECT 1 FROM customer_collaborators WHERE customer_id=? AND user_id=?',c.id,a.id)),'客户不存在或不可访问',404);return {customer_id:c.id,opportunity_id:null};}
     return {customer_id:null,opportunity_id:null};
   }
-  function record(actor,id,context={}){const a=current(actor),r=one(db,'SELECT * FROM minutes_records WHERE id=?',id);assert(r,'听记不存在',404);const owner=one(db,'SELECT member_id FROM minutes_sources WHERE id=?',r.source_id);assert(a.role==='admin'||owner?.member_id===a.id,'听记不存在或不可访问',404);if(context.customer_id||context.opportunity_id){const t=target(a,context.customer_id,context.opportunity_id);assert(r.customer_id===t.customer_id&&(!t.opportunity_id||r.opportunity_id===t.opportunity_id),'当前档案中没有这条听记',404);}else source(a,r.source_id);return r;}
+  function record(actor,id,context={}){const a=current(actor),r=one(db,'SELECT * FROM minutes_records WHERE id=?',id);assert(r,'听记不存在',404);source(a,r.source_id,{read:true});if(context.customer_id||context.opportunity_id){const t=target(a,context.customer_id,context.opportunity_id);assert(r.customer_id===t.customer_id&&(!t.opportunity_id||r.opportunity_id===t.opportunity_id),'当前档案中没有这条听记',404);}return r;}
   function saveArtifacts(id,values){
     for(const [kind,a] of Object.entries(normalizeArtifacts(values))){
       const previous=one(db,'SELECT * FROM minutes_artifacts WHERE record_id=? AND kind=?',id,kind);
@@ -47,17 +49,7 @@ export function createMinutesService(db,{binary=process.env.CRM_MINUTES_BINARY||
       run(db,`INSERT INTO minutes_artifacts VALUES(?,?,?,?,?,?,?) ON CONFLICT(record_id,kind) DO UPDATE SET state=excluded.state,content=CASE WHEN excluded.state IN ('ready','empty') THEN excluded.content ELSE minutes_artifacts.content END,reason=excluded.reason,checked_at=excluded.checked_at,succeeded_at=CASE WHEN excluded.state='ready' THEN excluded.succeeded_at ELSE minutes_artifacts.succeeded_at END`,id,kind,a.state,a.content,a.reason,now(),a.state==='ready'?now():null);
     }
   }
-  function followup(id){
-    const r=one(db,'SELECT r.*,s.member_id FROM minutes_records r JOIN minutes_sources s ON s.id=r.source_id WHERE r.id=?',id);
-    // Only an explicit opportunity association creates an automatic summary; never infer a customer from a title.
-    const old=one(db,'SELECT * FROM activities WHERE minutes_record_id=?',id);
-    if(!r.opportunity_id){if(old)run(db,'DELETE FROM activities WHERE id=?',old.id);return;}
-    const summary=one(db,"SELECT content FROM minutes_artifacts WHERE record_id=? AND kind='summary' AND state='ready'",id)?.content;
-    if(!summary)return;
-    const day=new Date(new Date(r.start_time).getTime()+8*3600000).toISOString().slice(0,10);
-    if(old)run(db,'UPDATE activities SET opportunity_id=?,summary=? WHERE id=?',r.opportunity_id,summary.slice(0,20000),old.id);
-    else run(db,"INSERT INTO activities(opportunity_id,user_id,source,activity_type,summary,action,activity_date,created_at,minutes_record_id) VALUES(?,?,'AI听记','听记摘要',?,'',?,?,?)",r.opportunity_id,r.member_id,summary.slice(0,20000),day,now(),id);
-  }
+  const followup=id=>syncMinutesFollowup(db,id);
   const authorizationContext=a=>{const c=a?.candidate?JSON.parse(a.candidate):null;return {candidate:c?.profile||c?.provider==='personal_mcp'?c:null,accountMode:c?.accountMode==='separate_account'?'separate_account':'same_account',identity:c?.crmIdentity};};
   const canConfirmOwner=(actor,accountMode)=>accountMode!=='separate_account'||!actor._operator_id||!!one(db,'SELECT 1 FROM users u JOIN ding_identities d ON d.user_id=u.id WHERE u.id=? AND u.active=1 AND u.developer_admin=1 AND u.business_member=0',actor._operator_id);
   const confirmOwner=(actor,accountMode)=>assert(canConfirmOwner(actor,accountMode),'当前操作者无权确认该成员的听记关联',403);
@@ -113,17 +105,17 @@ export function createMinutesService(db,{binary=process.env.CRM_MINUTES_BINARY||
     try{
       if(resume?.id===runId)run(db,"UPDATE minutes_sync_runs SET status='running',error_message='',finished_at=NULL WHERE id=?",runId);
       else run(db,"INSERT INTO minutes_sync_runs(id,source_id,status,from_time,to_time,created_at,mode,pages,fetched,cursor) VALUES(?,?,'running',?,?,?,?,?,?,?)",runId,id,from,to,now(),history?'history':'incremental',resume?.pages||0,resume?.fetched||0,resume?.cursor||null);
-      const c=client(s);await c.verify();let cursor=resume?.cursor||null;const seen=new Set();let count=resume?.fetched||0,partial=!!(resume?.pages&&one(db,"SELECT 1 FROM minutes_records r LEFT JOIN minutes_artifacts a ON a.record_id=r.id WHERE r.source_id=? AND (r.media_state='failed' OR a.state NOT IN('ready','empty')) LIMIT 1",id));
+      const c=client(s);await c.verify();let cursor=resume?.cursor||null;const seen=new Set();let count=resume?.fetched||0,partial=!!(resume?.pages&&one(db,"SELECT 1 FROM minutes_records r WHERE r.source_id=? AND r.start_time>=? AND r.start_time<? AND (r.media_state='failed' OR (SELECT COUNT(*) FROM minutes_artifacts a WHERE a.record_id=r.id AND a.kind IN('summary','transcript'))<2 OR EXISTS(SELECT 1 FROM minutes_artifacts a WHERE a.record_id=r.id AND a.kind IN('summary','transcript') AND a.state IN('pending','failed','unsupported_shape'))) LIMIT 1",id,from,to));
       for(let page=0;;page++){
         assert(page<100&&!seen.has(cursor),history?'历史听记本轮分页尚未读完，请继续读取；已保存页面会保留':'听记分页未完整返回，请稍后重试',502);seen.add(cursor);authorize();source(actor,id,{connected:true});
-        const result=await c.list({from:history&&!range?null:from,to,cursor});assert(Array.isArray(result.items)&&(result.next===null||typeof result.next==='string'&&result.next),'听记分页返回不完整',502);
+        const result=await c.list({from:history&&from==='1970-01-01T00:00:00.000Z'?null:from,to,cursor});assert(Array.isArray(result.items)&&(result.next===null||typeof result.next==='string'&&result.next),'听记分页返回不完整',502);
         let tags=null;if(c.tagEvidence)try{tags=await c.tagEvidence(result.items.map(r=>r.uuid));}catch{}
         const records=[];
         for(const raw of result.items){
           assert(typeof raw.uuid==='string'&&/^[-a-zA-Z0-9_]{1,240}$/.test(raw.uuid)&&typeof raw.title==='string'&&Number.isSafeInteger(raw.startTime)&&raw.startTime>0&&Number.isSafeInteger(raw.durationMicros)&&raw.durationMicros>=0,'听记记录字段不完整',502);
           const start=new Date(raw.startTime).toISOString();if((!history&&!automatic&&start<s.collect_from)||start<from||start>=to)continue;
           let media;try{media=await c.audio(raw.uuid);assert(['available','unavailable','unsupported'].includes(media.state),'录音状态无效',502);if(media.state==='available')assert(safeMinutesAudio(media.url),'录音域名未经核验',502);}catch{media={state:'failed',reason:'录音读取未完成'};}
-          const artifacts=normalizeArtifacts(await c.artifacts(raw.uuid));if(media.state==='failed'||artifactKinds.some(k=>!['ready','empty'].includes(artifacts[k]?.state)))partial=true;
+          const artifacts=normalizeArtifacts(await c.artifacts(raw.uuid));if(media.state==='failed'||retryableCore(artifacts))partial=true;
           records.push({raw,start,media,artifacts});
         }
         transaction(db,()=>{authorize();const latest=source(actor,id,{connected:true});assert(latest.credential_key===s.credential_key,'听记账号连接已变化',409);
@@ -141,11 +133,11 @@ export function createMinutesService(db,{binary=process.env.CRM_MINUTES_BINARY||
         // came from an explicit historical import). Retry a bounded, rotating
         // batch without re-importing history or rewriting manual associations.
         const started=one(db,'SELECT created_at FROM minutes_sync_runs WHERE id=?',runId).created_at;
-        const pending=all(db,"SELECT r.* FROM minutes_records r WHERE r.source_id=? AND r.synced_at<? AND (r.media_state='failed' OR (SELECT COUNT(*) FROM minutes_artifacts a WHERE a.record_id=r.id)<4 OR EXISTS(SELECT 1 FROM minutes_artifacts a WHERE a.record_id=r.id AND a.state NOT IN('ready','empty'))) ORDER BY r.synced_at,r.id LIMIT 5",id,started);
+        const pending=all(db,"SELECT r.* FROM minutes_records r WHERE r.source_id=? AND r.synced_at<? AND (r.media_state='failed' OR (SELECT COUNT(*) FROM minutes_artifacts a WHERE a.record_id=r.id AND a.kind IN('summary','transcript'))<2 OR EXISTS(SELECT 1 FROM minutes_artifacts a WHERE a.record_id=r.id AND a.kind IN('summary','transcript') AND a.state IN('pending','failed','unsupported_shape'))) ORDER BY r.synced_at,r.id LIMIT 5",id,started);
         for(const r of pending){
           authorize();assert(source(actor,id,{connected:true}).credential_key===s.credential_key,'听记账号连接已变化',409);
           let media;try{media=await c.audio(r.external_id);assert(['available','unavailable','unsupported'].includes(media.state),'录音状态无效',502);if(media.state==='available')assert(safeMinutesAudio(media.url),'录音域名未经核验',502);}catch{media={state:'failed',reason:'录音读取未完成'};}
-          const artifacts=normalizeArtifacts(await c.artifacts(r.external_id));if(media.state==='failed'||artifactKinds.some(k=>!['ready','empty'].includes(artifacts[k]?.state)))partial=true;
+          const artifacts=normalizeArtifacts(await c.artifacts(r.external_id));if(media.state==='failed'||retryableCore(artifacts))partial=true;
           transaction(db,()=>{authorize();assert(source(actor,id,{connected:true}).credential_key===s.credential_key,'听记账号连接已变化',409);run(db,'UPDATE minutes_records SET media_state=?,media_reason=?,synced_at=? WHERE id=?',media.state,media.reason||'',now(),r.id);saveArtifacts(r.id,artifacts);followup(r.id);});
         }
       }
@@ -156,7 +148,7 @@ export function createMinutesService(db,{binary=process.env.CRM_MINUTES_BINARY||
   function sync(...args){const task=executeSync(...args).finally(()=>syncTasks.delete(task));syncTasks.add(task);return task;}
   function startHistory(actor,id,{authorize=()=>current(actor)}={}){
     assert(enabled,'听记连接器尚未配置，请联系项目负责人',503);authorize();source(actor,id,{connected:true});assert(!syncing.has(id),'此账号正在采集，请稍后刷新',409);
-    const latest=one(db,"SELECT * FROM minutes_sync_runs WHERE source_id=? AND mode='history' ORDER BY rowid DESC LIMIT 1",id),resume=latest?.status==='failed'?latest:null,runId=resume?.id||randomUUID();
+    const latest=one(db,"SELECT * FROM minutes_sync_runs WHERE source_id=? AND mode='history' AND from_time='1970-01-01T00:00:00.000Z' ORDER BY rowid DESC LIMIT 1",id),resume=latest?.status==='failed'?latest:null,runId=resume?.id||randomUUID();
     // Return immediately; historical audio and transcripts can take minutes.
     // Each committed page stores its next cursor so a failed job can resume.
     const task=sync(actor,id,{history:true,resume,runId,authorize});void task.catch(()=>{});
@@ -172,22 +164,63 @@ export function createMinutesService(db,{binary=process.env.CRM_MINUTES_BINARY||
     void sync(actor,id,{history:true,range,resume,runId,authorize}).catch(()=>{});
     return {id:runId,status:'running',message:resume?'正在从保存的分页继续同步':'所选日期的听记同步已开始'};
   }
+  function retryRun(actor,id,{authorize=()=>current(actor)}={}){
+    assert(typeof id==='string'&&/^[a-f0-9-]{36}$/.test(id),'同步任务编号无效');
+    authorize();const previous=one(db,'SELECT * FROM minutes_sync_runs WHERE id=?',id);assert(previous,'同步任务不存在',404);
+    source(actor,previous.source_id,{connected:true});assert(enabled,'听记连接器尚未配置，请联系项目负责人',503);
+    assert(['failed','partial'].includes(previous.status),'该同步任务已完成或正在运行，无需重试',409);assert(!syncing.has(previous.source_id),'此账号正在采集，请稍后刷新',409);
+    const partial=previous.status==='partial',runId=partial?randomUUID():previous.id,resume=partial?{...previous,cursor:null,pages:0,fetched:0}:previous;
+    void sync(actor,previous.source_id,{authorize,history:previous.mode==='history',resume,runId}).catch(()=>{});
+    assert(one(db,"SELECT id FROM minutes_sync_runs WHERE id=? AND status='running'",runId),'同步任务未能启动，请稍后重试',503);
+    return {id:runId,status:'running',message:partial?'已按原同步范围重新读取，补齐尚未完成的正文':'已按原同步范围及保存的分页继续重试'};
+  }
+  const memberEnabled=s=>!!one(db,'SELECT id FROM users WHERE id=? AND active=1 AND business_member=1 AND developer_admin=0',s.member_id);
+  function sourceFlags(actor,s){
+    const active=memberEnabled(s),connected=s.connection_state==='connected';
+    return {member_active:active,connection_state:s.connection_state,can_refresh:enabled&&active&&connected,
+      can_sync:enabled&&active&&connected&&!syncing.has(s.id),can_disconnect:active&&connected&&s.member_id===actor.id&&!syncing.has(s.id)};
+  }
+  const allowedFilter=(value,values,label)=>{assert(!value||value==='all'||values.includes(value),label+'无效');return value&&value!=='all'?value:'';};
+  const recordJoins=" FROM minutes_records r JOIN minutes_sources s ON s.id=r.source_id LEFT JOIN customers c ON c.id=r.customer_id LEFT JOIN opportunities o ON o.id=r.opportunity_id LEFT JOIN minutes_artifacts ms ON ms.record_id=r.id AND ms.kind='summary' LEFT JOIN minutes_artifacts mt ON mt.record_id=r.id AND mt.kind='transcript' LEFT JOIN minutes_artifacts mr ON mr.record_id=r.id AND mr.kind='recognition'";
+  function listRuns(actor,params={}){
+    const a=current(actor),where=[],values=[];
+    if(a.role!=='admin'){where.push('s.member_id=?');values.push(a.id);}
+    if(params.source_id){source(a,params.source_id,{read:true});where.push('r.source_id=?');values.push(params.source_id);}
+    const status=allowedFilter(params.status,['running','success','partial','failed'],'同步状态');
+    if(status){where.push('r.status=?');values.push(status);}
+    const range=minutesDateRange(params.from,params.to);
+    if(range){where.push('r.from_time<? AND r.to_time>?');values.push(range.to,range.from);}
+    const clause=where.length?' WHERE '+where.join(' AND '):'',from=' FROM minutes_sync_runs r JOIN minutes_sources s ON s.id=r.source_id LEFT JOIN users u ON u.id=s.member_id';
+    const count=one(db,'SELECT COUNT(*) n'+from+clause,...values).n,pageSize=minutesPageSize(params.page_size),page=minutesPageNumber(params.page);
+    const runs=all(db,'SELECT r.id,r.source_id,r.mode,r.status,r.from_time,r.to_time,r.pages,r.fetched,r.error_message,r.created_at,r.finished_at,s.account_name,s.member_id,s.connection_state,u.name member_name,u.active member_active'+from+clause+' ORDER BY r.created_at DESC,r.rowid DESC LIMIT ? OFFSET ?',...values,pageSize,(page-1)*pageSize).map(r=>{
+      const reason=!memberEnabled(r)?'成员已停用，仅保留历史档案':r.connection_state!=='connected'?'连接已停止，需账号本人重新连接':!enabled?'连接器尚未配置':syncing.has(r.source_id)?'该账号正在同步':!['failed','partial'].includes(r.status)?r.status==='running'?'任务正在运行':'任务已完成，无需重试':'';
+      return {...r,member_active:!!r.member_active,can_retry:!reason,retry_reason:reason,range_label:r.from_time==='1970-01-01T00:00:00.000Z'?'全部历史':r.mode==='history'?'指定日期':'增量同步'};
+    });
+    return {runs,count,page,page_size:pageSize};
+  }
   function list(actor,params={}){
     const a=current(actor),where=[],values=[];const context={customer_id:params.customer_id?Number(params.customer_id):null,opportunity_id:params.opportunity_id?Number(params.opportunity_id):null};
     if(context.customer_id||context.opportunity_id){const t=target(a,context.customer_id,context.opportunity_id);where.push('r.customer_id=?');values.push(t.customer_id);if(t.opportunity_id){where.push('r.opportunity_id=?');values.push(t.opportunity_id);}}
     if(a.role!=='admin'){where.push('s.member_id=?');values.push(a.id);}
-    if(params.source_id){source(a,params.source_id);where.push('r.source_id=?');values.push(params.source_id);}
-    if(params.q){where.push('r.title LIKE ?');values.push('%'+String(params.q).slice(0,200)+'%');}
+    if(params.source_id){source(a,params.source_id,{read:true});where.push('r.source_id=?');values.push(params.source_id);}
+    if(params.q){where.push('(r.title LIKE ? OR c.name LIKE ? OR o.name LIKE ? OR s.account_name LIKE ?)');const q='%'+String(params.q).slice(0,200)+'%';values.push(q,q,q,q);}
     const range=minutesDateRange(params.from,params.to);if(range){where.push('r.start_time>=? AND r.start_time<?');values.push(range.from,range.to);}
-    const clause=where.length?' WHERE '+where.join(' AND '):'',page=Math.max(1,Math.min(100000,Number(params.page)||1));
-    const count=one(db,'SELECT COUNT(*) n FROM minutes_records r JOIN minutes_sources s ON s.id=r.source_id'+clause,...values).n;
-    const pageSize=[10,30,50].includes(Number(params.page_size))?Number(params.page_size):10;
-    const totals=one(db,`SELECT COUNT(*) total,COALESCE(SUM(r.media_state='available'),0) available,COALESCE(SUM(r.media_state='unsupported'),0) unsupported,COALESCE(SUM(r.customer_id IS NOT NULL),0) linked,COALESCE(SUM(EXISTS(SELECT 1 FROM minutes_artifacts a WHERE a.record_id=r.id AND a.kind='recognition' AND json_extract(a.content,'$.type') IN('visit','demo'))),0) recognized FROM minutes_records r JOIN minutes_sources s ON s.id=r.source_id ${clause}`,...values);
-    const runWhere=[],runValues=[];if(a.role!=='admin'){runWhere.push('s.member_id=?');runValues.push(a.id);}if(params.source_id){runWhere.push('s.id=?');runValues.push(params.source_id);}
-    const runs=all(db,`SELECT r.id,r.source_id,r.mode,r.status,r.from_time,r.to_time,r.pages,r.fetched,r.error_message,r.created_at,r.finished_at,s.account_name FROM minutes_sync_runs r JOIN minutes_sources s ON s.id=r.source_id ${runWhere.length?'WHERE '+runWhere.join(' AND '):''} ORDER BY r.created_at DESC,r.rowid DESC LIMIT 20`,...runValues);
-    return {records:all(db,`SELECT r.*,s.account_name,s.corp_name,s.member_id,c.name customer_name,o.name opportunity_name,(SELECT state FROM minutes_artifacts a WHERE a.record_id=r.id AND a.kind='summary') summary_state,(SELECT json_extract(content,'$.type') FROM minutes_artifacts a WHERE a.record_id=r.id AND a.kind='recognition') recognized_type,(SELECT reason FROM minutes_artifacts a WHERE a.record_id=r.id AND a.kind='recognition') recognition_reason FROM minutes_records r JOIN minutes_sources s ON s.id=r.source_id LEFT JOIN customers c ON c.id=r.customer_id LEFT JOIN opportunities o ON o.id=r.opportunity_id ${clause} ORDER BY r.start_time DESC,r.id DESC LIMIT ? OFFSET ?`,...values,pageSize,(page-1)*pageSize),count,page,page_size:pageSize,totals,runs};
+    const link=allowedFilter(params.link_state,['linked','unlinked'],'关联状态'),content=allowedFilter(params.content_state,['ready','pending','failed','unavailable'],'正文状态'),media=allowedFilter(params.media_state,['available','unavailable','unsupported','failed'],'录音状态'),recognition=allowedFilter(params.recognition,['visit','demo','pending'],'活动分类');
+    if(link)where.push(link==='linked'?'(r.customer_id IS NOT NULL OR r.opportunity_id IS NOT NULL)':'(r.customer_id IS NULL AND r.opportunity_id IS NULL)');
+    if(content){where.push('('+coreStateSql()+')=?');values.push(content);}
+    if(media){where.push('r.media_state=?');values.push(media);}
+    if(recognition){where.push(recognition==='pending'?"COALESCE(json_extract(mr.content,'$.type'),'') NOT IN('visit','demo')":"json_extract(mr.content,'$.type')=?");if(recognition!=='pending')values.push(recognition);}
+    const clause=where.length?' WHERE '+where.join(' AND '):'',page=minutesPageNumber(params.page),pageSize=minutesPageSize(params.page_size);
+    const count=one(db,'SELECT COUNT(*) n'+recordJoins+clause,...values).n;
+    const totals=one(db,`SELECT COUNT(*) total,COALESCE(SUM(r.media_state='available'),0) available,COALESCE(SUM(r.media_state='unsupported'),0) unsupported,COALESCE(SUM(r.customer_id IS NOT NULL OR r.opportunity_id IS NOT NULL),0) linked,COALESCE(SUM(r.customer_id IS NULL AND r.opportunity_id IS NULL),0) unlinked,COALESCE(SUM((${coreStateSql()})='ready'),0) content_ready,COALESCE(SUM((${coreStateSql()})='pending'),0) content_pending,COALESCE(SUM((${coreStateSql()})='failed'),0) content_failed,COALESCE(SUM(json_extract(mr.content,'$.type') IN('visit','demo')),0) recognized`+recordJoins+clause,...values);
+    const sources=new Map(all(db,'SELECT * FROM minutes_sources').map(s=>[s.id,s]));
+    const records=all(db,`SELECT r.*,s.account_name,s.corp_name,s.member_id,c.name customer_name,o.name opportunity_name,ms.state summary_state,mt.state transcript_state,json_extract(mr.content,'$.type') recognized_type,mr.reason recognition_reason`+recordJoins+clause+' ORDER BY r.start_time DESC,r.id DESC LIMIT ? OFFSET ?',...values,pageSize,(page-1)*pageSize).map(r=>{
+      const state=minutesContentState({summary:{state:r.summary_state},transcript:{state:r.transcript_state}});
+      return {...r,...sourceFlags(a,sources.get(r.source_id)),content_state:state.state,content_label:state.label};
+    });
+    return {records,count,page,page_size:pageSize,totals,runs:listRuns(a,{source_id:params.source_id,from:params.from,to:params.to}).runs};
   }
-  function detail(actor,id,context){const r=record(actor,id,context);return {...r,artifacts:Object.fromEntries(all(db,'SELECT * FROM minutes_artifacts WHERE record_id=?',r.id).map(a=>[a.kind,a])),can_manage:current(actor).role==='admin'||one(db,'SELECT member_id FROM minutes_sources WHERE id=?',r.source_id)?.member_id===actor.id};}
+  function detail(actor,id,context){const r=record(actor,id,context),s=source(actor,r.source_id,{read:true}),artifacts=storedArtifacts(r.id),state=minutesContentState(artifacts);return {...r,account_name:s.account_name,member_id:s.member_id,...sourceFlags(actor,s),artifacts,content_state:state.state,content_label:state.label,can_manage:current(actor).role==='admin'||s.member_id===actor.id};}
   async function prepare(actor,action,id,body,authorize){
     assert(enabled,'听记连接器尚未配置，请联系项目负责人',503);authorize();
     if(action==='personal-import'){
@@ -234,7 +267,12 @@ export function createMinutesService(db,{binary=process.env.CRM_MINUTES_BINARY||
       assert(Object.keys(body).length===1,'确认连接只接受归属确认');const context=authorizationContext(a);confirmOwner(actor,context.accountMode);
       const identity=await verify(actor,{...context.candidate,key:a.credential_key||id},context);authorize();return {identity,candidate:a.candidate};
     }
-    if(action==='refresh'){const r=record(actor,Number(id),body),s=recordSource(actor,r);const c=client(s);await c.verify();const artifacts=normalizeArtifacts(await c.artifacts(r.external_id));authorize();return {artifacts,sourceKey:s.credential_key};}
+    if(action==='refresh'){
+      const r=record(actor,Number(id),body),s=recordSource(actor,r),c=client(s);await c.verify();
+      const artifacts=normalizeArtifacts(await c.artifacts(r.external_id));
+      let media;try{media=await c.audio(r.external_id);assert(['available','unavailable','unsupported'].includes(media.state),'录音状态无效',502);assert(typeof (media.reason??'')==='string'&&(media.reason||'').length<=500,'录音状态说明无效',502);if(media.state==='available')assert(safeMinutesAudio(media.url),'录音域名未经核验',502);}catch{media={state:'failed',reason:'录音读取未完成，可稍后重新检查'};}
+      authorize();return {artifacts,media:{state:media.state,reason:media.reason||''},sourceKey:s.credential_key,sourceCorp:s.corp_id,sourceUser:s.user_id};
+    }
     return null;
   }
   function mutate(actor,action,id,b,prepared){
@@ -287,7 +325,7 @@ export function createMinutesService(db,{binary=process.env.CRM_MINUTES_BINARY||
     if(action==='disconnect'){source(actor,id,{own:true});assert(!syncing.has(id),'请等待当前采集结束',409);run(db,"UPDATE minutes_sources SET connection_state='disconnected' WHERE id=?",id);audit(actor,'停止听记连接',id,{history_retained:true});return {message:'已停止连接，已有听记保留'};}
     if(action==='association'){
       assert(Object.keys(b).every(k=>['revision','customer_id','opportunity_id','reason'].includes(k))&&Number.isSafeInteger(b.revision)&&typeof b.reason==='string'&&b.reason.trim()&&b.reason.length<=500,'请提供当前版本、关联对象和说明');
-      const r=record(actor,Number(id)),s=source(actor,r.source_id);assert(actor.role==='admin'||s.member_id===actor.id,'仅账号本人或管理员可维护关联',403);assert(r.revision===b.revision,'听记关联已更新，请刷新后重试',409);
+      const r=record(actor,Number(id)),s=source(actor,r.source_id,{read:true});assert(actor.role==='admin'||s.member_id===actor.id,'仅账号本人或管理员可维护关联',403);assert(r.revision===b.revision,'听记关联已更新，请刷新后重试',409);
       if(actor.role!=='admin'&&(r.customer_id||r.opportunity_id))target(actor,r.customer_id,r.opportunity_id);
       const t=target(actor,b.customer_id,b.opportunity_id),previous=one(db,'SELECT id,summary,opportunity_id FROM activities WHERE minutes_record_id=?',r.id);run(db,'UPDATE minutes_records SET customer_id=?,opportunity_id=?,revision=revision+1 WHERE id=?',t.customer_id,t.opportunity_id,r.id);followup(r.id);audit(actor,'维护听记业务关联',r.id,{before:{customer_id:r.customer_id,opportunity_id:r.opportunity_id,automatic_summary:previous||null},after:t,reason:b.reason});return {id:r.id,message:t.customer_id?'听记已关联业务档案':'听记关联已取消'};
     }
@@ -303,13 +341,31 @@ export function createMinutesService(db,{binary=process.env.CRM_MINUTES_BINARY||
       audit(actor,'读取钉钉发言人总结',r.id,{requested_generation:b.generate,state:artifact.state});
       return {id:r.id,state:artifact.state,message:artifact.state==='ready'?'已读取钉钉发言人总结':artifact.reason};
     }
-    if(action==='refresh'){const r=record(actor,Number(id),b),s=recordSource(actor,r);assert(s.credential_key===prepared?.sourceKey,'听记连接已变化',409);saveArtifacts(r.id,prepared.artifacts);followup(r.id);audit(actor,'重新读取听记正文',r.id);return {id:r.id,message:'已读取源接口返回的正文状态'};}
+    if(action==='refresh'){
+      const r=record(actor,Number(id),b),s=recordSource(actor,r);assert(s.credential_key===prepared?.sourceKey&&s.corp_id===prepared.sourceCorp&&s.user_id===prepared.sourceUser,'听记连接已变化',409);
+      saveArtifacts(r.id,prepared.artifacts);run(db,'UPDATE minutes_records SET media_state=?,media_reason=? WHERE id=?',prepared.media.state,prepared.media.reason,r.id);followup(r.id);
+      audit(actor,'重新读取听记正文',r.id,{media_state:prepared.media.state});return {id:r.id,message:prepared.media.state==='failed'?'正文状态已更新，录音本次读取未完成，可稍后重试':'已重新核对正文与录音状态'};
+    }
     assert(false,'听记操作不存在',404);
   }
   function summary(actor){
-    const a=current(actor);expire();const sources=all(db,'SELECT '+safeSources+' FROM minutes_sources'+(a.role==='admin'?'':' WHERE member_id=?')+' ORDER BY created_at',...(a.role==='admin'?[]:[a.id])).map(s=>({...s,schedule:sourceSchedule(s),history:one(db,"SELECT id,status,pages,fetched,error_message,created_at,finished_at FROM minutes_sync_runs WHERE source_id=? AND mode='history' ORDER BY rowid DESC LIMIT 1",s.id)||null}));
+    const a=current(actor);expire();const sources=all(db,'SELECT '+safeSources+' FROM minutes_sources'+(a.role==='admin'?'':' WHERE member_id=?')+' ORDER BY created_at',...(a.role==='admin'?[]:[a.id])).map(s=>{
+      const member=one(db,'SELECT name FROM users WHERE id=?',s.member_id),schedule=sourceSchedule(s),flags=sourceFlags(a,s),latest=one(db,'SELECT status,error_message FROM minutes_sync_runs WHERE source_id=? ORDER BY rowid DESC LIMIT 1',s.id);
+      const state=!flags.member_active?'inactive':s.connection_state!=='connected'?'stopped':!enabled?'unconfigured':syncing.has(s.id)?'running':latest?.status==='failed'?'retrying':latest?.status==='partial'?'partial':schedule.state;
+      const label={inactive:'成员已停用 · 保留历史档案',stopped:'已停止连接',unconfigured:'连接器尚未配置',local:'本地手动读取',running:'同步中',retrying:'最近同步失败',partial:'核心正文或录音待补齐',scheduled:'自动更新已启用'}[state]||'状态待核对';
+      return {...s,...flags,member_name:member?.name||'历史成员',schedule,health:{state,label,reason:latest?.status==='failed'?latest.error_message||'同步未完成':schedule.last_error||'',last_synced_at:s.last_synced_at,next_update_at:schedule.next_update_at},history:one(db,"SELECT id,status,pages,fetched,error_message,created_at,finished_at FROM minutes_sync_runs WHERE source_id=? AND mode='history' ORDER BY rowid DESC LIMIT 1",s.id)||null};
+    });
+    const members=all(db,"SELECT id,name,active FROM users WHERE business_member=1 AND developer_admin=0 AND role IN('admin','sales')"+(a.role==='admin'?'':' AND id=?'),...(a.role==='admin'?[]:[a.id])).map(member=>{
+      const linked=sources.filter(s=>s.member_id===member.id),connected=linked.filter(s=>s.connection_state==='connected');
+      const authorization=one(db,'SELECT status,error_message FROM minutes_authorizations WHERE member_id=? ORDER BY created_at DESC,rowid DESC LIMIT 1',member.id);
+      const failing=connected.find(s=>['retrying','partial'].includes(s.health.state)),pending=['starting','awaiting','verifying','pending_confirmation'].includes(authorization?.status);
+      const state=!member.active?'inactive':failing?'attention':connected.length?'connected':pending?'awaiting_confirmation':authorization?.status==='failed'?'authorization_failed':linked.length?'disconnected':'unconnected';
+      const label={inactive:'成员已停用',attention:'最近同步需处理',connected:'已连接',awaiting_confirmation:'等待本人完成授权',authorization_failed:'最近授权未完成',disconnected:'已停止连接',unconnected:'尚未连接'}[state];
+      return {member_id:member.id,member_name:member.name,member_active:!!member.active,source_count:linked.length,connected_count:connected.length,state,label,last_error:failing?.health.reason||(authorization?.status==='failed'?publicAuthorizationError(authorization.error_message):'')};
+    });
+    const active=members.filter(m=>m.member_active),coverage={members,total:active.length,connected:active.filter(m=>m.connected_count>0).length,unconnected:active.filter(m=>!m.connected_count).length,attention:active.filter(m=>['attention','authorization_failed','awaiting_confirmation'].includes(m.state)).length};
     const row=one(db,'SELECT * FROM minutes_authorizations WHERE member_id=? ORDER BY created_at DESC,rowid DESC LIMIT 1',a.id),context=authorizationContext(row),c=context.candidate;
-    return {enabled,automatic:deployment==='production',sources,authorization:row?{id:row.id,status:row.status,account_mode:context.accountMode,can_confirm:canConfirmOwner(actor,context.accountMode),candidate:c?{accountName:c.accountName,corpName:c.corpName,profile:c.profile||null,provider:c.provider||'dws',preview:c.provider==='personal_mcp'?c.preview||[]:[]}:null,profiles:JSON.parse(row.verified_profiles),error:publicAuthorizationError(row.error_message),expires_at:row.expires_at,prompt:row.status==='awaiting'?authorizations.get(row.id)?.prompt||null:null}:null,runs:all(db,'SELECT r.id,r.source_id,r.mode,r.status,r.from_time,r.to_time,r.pages,r.fetched,r.error_message,r.created_at,r.finished_at FROM minutes_sync_runs r JOIN minutes_sources s ON s.id=r.source_id'+(a.role==='admin'?'':' WHERE s.member_id=?')+' ORDER BY r.created_at DESC,r.rowid DESC LIMIT 10',...(a.role==='admin'?[]:[a.id]))};
+    return {enabled,automatic:deployment==='production',updated_at:now(),sources,coverage,authorization:row?{id:row.id,status:row.status,account_mode:context.accountMode,can_confirm:canConfirmOwner(actor,context.accountMode),candidate:c?{accountName:c.accountName,corpName:c.corpName,profile:c.profile||null,provider:c.provider||'dws',preview:c.provider==='personal_mcp'?c.preview||[]:[]}:null,profiles:JSON.parse(row.verified_profiles),error:publicAuthorizationError(row.error_message),expires_at:row.expires_at,prompt:row.status==='awaiting'?authorizations.get(row.id)?.prompt||null:null}:null,runs:listRuns(a).runs};
   }
   async function audio(actor,id,context,range,authorize){const r=record(actor,id,context),s=recordSource(actor,r),c=client(s);await c.verify();const a=await c.audio(r.external_id);authorize();record(actor,id,context);assert(recordSource(actor,r).credential_key===s.credential_key,'听记连接已变化',409);assert(a.state==='available','源平台暂未提供可播放录音',409);const response=await fetchMinutesAudio(a.url,{range,fetchImpl});try{authorize();record(actor,id,context);assert(recordSource(actor,r).credential_key===s.credential_key,'听记连接已变化',409);}catch(e){await response.body?.cancel();throw e;}return response;}
   function scheduledSync(){
@@ -345,5 +401,5 @@ export function createMinutesService(db,{binary=process.env.CRM_MINUTES_BINARY||
     return stopScheduler;
   }
   function recover(){run(db,"UPDATE minutes_authorizations SET status='failed',error_message='服务重启中断了授权，请重新发起',finished_at=? WHERE status IN('starting','awaiting','verifying')",now());run(db,"UPDATE minutes_sync_runs SET status='failed',error_message='服务重启中断了采集，已保存进度，等待重试',finished_at=? WHERE status='running'",now());}
-  return {summary,list,detail,prepare,mutate,sync,startHistory,startRange,audio,recover,startScheduler,scheduledSync,enabled,async shutdown(){stopScheduler();for(const s of authorizations.values()){s.cancelled=true;clearTimeout(s.timer);s.control?.cancel();}await Promise.allSettled([...syncTasks,...(scheduleTask?[scheduleTask]:[]),...[...authorizations.values()].map(s=>s.task)]);authorizations.clear();}};
+  return {summary,list,listRuns,detail,prepare,mutate,sync,startHistory,startRange,retryRun,audio,recover,startScheduler,scheduledSync,enabled,async shutdown(){stopScheduler();for(const s of authorizations.values()){s.cancelled=true;clearTimeout(s.timer);s.control?.cancel();}await Promise.allSettled([...syncTasks,...(scheduleTask?[scheduleTask]:[]),...[...authorizations.values()].map(s=>s.task)]);authorizations.clear();}};
 }

@@ -7,6 +7,8 @@ const routes = {
   receipt_split_missing: ['receipt', 'sales', 'payment-allocation'],
   receipt_split_exceeded: ['receipt', 'sales', 'payment-allocation'],
   receipt_date_missing: ['receipt', 'sales', 'payment-allocation'],
+  receipt_date_conflict: ['receipt', 'sales', 'payment-allocation'],
+  receipt_prior_incomplete: ['receipt', 'sales', 'payment-allocation'],
   product_basis_incomplete: ['receipt', 'sales', 'payment-allocation'],
   performance_missing: ['performance', 'admin', 'performance'],
   rate_missing: ['policy', 'admin', 'sales-policy'],
@@ -28,6 +30,34 @@ export function commissionDiagnostic(issue, { salesId = null, defaultPending = t
     responsibility: issue.responsibility ?? route?.[1] ?? null,
     action: issue.action ?? route?.[2] ?? null,
     sales_id: issue.sales_id ?? salesId,
+  };
+}
+
+export function receiptDiagnosticDetails(receipt, {code,blocking_receipt:blocker}, signDate) {
+  if(!code.startsWith('receipt_'))return {};
+  const source=blocker||receipt;
+  return {
+    payment_id:source.payment_id, payment_amount:source.amount, payment_date:source.date, sign_date:signDate,
+    ...(blocker?{blocking_code:blocker.code,affected_payment_ids:[receipt.payment_id]}:{}),
+  };
+}
+
+export function createCommissionIssueRecorder(issues, salesId) {
+  const positions=new Map();
+  return (contract,code,message,{component=null,pending=true,...extra}={})=>{
+    const value=commissionDiagnostic({contract_id:contract.id,contract_name:contract.name,code,message,display_message:`${contract.name}：${message}`,component,pending,...extra},{salesId});
+    const key=value.payment_id!=null
+      ? JSON.stringify([contract.id,value.blocking_code||code,value.payment_id])
+      : JSON.stringify([contract.id,code,message]);
+    const index=positions.get(key);
+    if(index==null){
+      positions.set(key,issues.length);
+      issues.push(value);
+    }else if(value.payment_id!=null){
+      const existing=issues[index];
+      const affected=[...new Set([...(existing.affected_payment_ids||[]),...(value.affected_payment_ids||[])])];
+      issues[index]={...(value.blocking_code?existing:value),affected_payment_ids:affected};
+    }
   };
 }
 

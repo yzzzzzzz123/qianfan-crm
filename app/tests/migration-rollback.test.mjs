@@ -62,7 +62,7 @@ test('真实旧库存在超额到账时升级整体回滚且关闭连接，修�
   for(const [table,rows] of Object.entries(before))assert.deepEqual(all(db,'SELECT * FROM '+table),rows,table+' rollback');
   db.prepare('UPDATE payments SET amount=? WHERE id=?').run(paid.amount,paid.id);
   db.close();db=null;db=openDatabase(filename);
-  assert.equal(one(db,'SELECT max(version) n FROM schema_version').n,35);
+  assert.equal(one(db,'SELECT max(version) n FROM schema_version').n,36);
   assertLatestAdditions(db,true);
   assert.equal(one(db,'SELECT amount FROM payments WHERE id=?',paid.id).amount,paid.amount);
   assert.deepEqual(all(db,'PRAGMA foreign_key_check'),[]);
@@ -104,7 +104,7 @@ test('听记结构迁移失败整体回滚，新表与自动摘要关联列不�
   db=new DatabaseSync(filename);assert.equal(one(db,'SELECT max(version) n FROM schema_version').n,16);assert.equal(one(db,"SELECT name FROM sqlite_master WHERE name='minutes_records'"),undefined);assert.equal(all(db,'PRAGMA table_info(activities)').some(c=>c.name==='minutes_record_id'),false);
   for(const c of old){const actual=one(db,'SELECT * FROM customers WHERE id=?',c.id);for(const [k,v] of Object.entries(c))if(Object.hasOwn(actual,k))assert.equal(actual[k],v);}
   assertLatestAdditions(db,false);
-  db.exec('DROP TRIGGER fail_minutes_schema');db.close();db=null;db=openDatabase(filename);assert.equal(one(db,'SELECT max(version) n FROM schema_version').n,35);assert.equal(one(db,'SELECT COUNT(*) n FROM minutes_records').n,0);assertLatestAdditions(db,true);assert.deepEqual(all(db,'PRAGMA foreign_key_check'),[]);
+  db.exec('DROP TRIGGER fail_minutes_schema');db.close();db=null;db=openDatabase(filename);assert.equal(one(db,'SELECT max(version) n FROM schema_version').n,36);assert.equal(one(db,'SELECT COUNT(*) n FROM minutes_records').n,0);assertLatestAdditions(db,true);assert.deepEqual(all(db,'PRAGMA foreign_key_check'),[]);
 });
 
 test('会议规则迁移失败回滚新增列和提成行重建，重试保留旧结算快照与返点',t=>{
@@ -121,7 +121,7 @@ test('会议规则迁移失败回滚新增列和提成行重建，重试保留�
   assert.equal(all(db,'PRAGMA table_info(commission_lines)').some(c=>c.name==='component'),false);
   assert.equal(one(db,'SELECT snapshot FROM commission_batches WHERE id=1').snapshot,snapshot);
   db.exec('DROP TRIGGER fail_meeting_schema');db.close();db=null;db=openDatabase(filename);
-  assert.equal(one(db,'SELECT max(version) n FROM schema_version').n,35);
+  assert.equal(one(db,'SELECT max(version) n FROM schema_version').n,36);
   assertLatestAdditions(db,true);
   assert.equal(one(db,'SELECT snapshot FROM commission_batches WHERE id=1').snapshot,snapshot);
   assert.equal(one(db,'SELECT rebate_rate FROM commission_lines WHERE id=1').rebate_rate,.45);

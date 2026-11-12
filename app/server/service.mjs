@@ -9,7 +9,7 @@ import { one, run, transaction } from "./database.mjs";
 import { AppError, assert, now, text } from "./domain.mjs";
 import { createAuth, publicUser } from "./modules/auth.mjs";
 import { buildState } from "./modules/reporting-prd.mjs";
-import { handleCustomers } from "./modules/customers.mjs";
+import { handleCustomers, readCustomerTransfer } from "./modules/customers.mjs";
 import { handleOpportunities } from "./modules/opportunities.mjs";
 import { handleActivities } from "./modules/activities.mjs";
 import { handleQuotes } from "./modules/quotes.mjs";
@@ -216,9 +216,12 @@ export function createService(
     if (method === "GET") {
       if(path==='/api/company-profiles/status'){admin(actor);return {body:queueSummary()};}
       const params=new URL(req.url||path,'http://localhost').searchParams;
+      const customerTransfer=path.match(/^\/api\/customers\/(\d+)\/transfer-preview$/);
+      if(customerTransfer)return {body:readCustomerTransfer({db,admin,scoped,owner},actor,Number(customerTransfer[1]),params)};
       const context={customer_id:params.has('customer_id')?Number(params.get('customer_id')):null,opportunity_id:params.has('opportunity_id')?Number(params.get('opportunity_id')):null};
       if(path.startsWith('/api/minutes'))for(const key of ['customer_id','opportunity_id'])if(params.has(key))assert(/^\d+$/.test(params.get(key))&&Number.isSafeInteger(context[key])&&context[key]>0,'听记查看范围无效');
       if(path==='/api/minutes')return {body:minutes.list(actor,Object.fromEntries(params))};
+      if(path==='/api/minutes/runs')return {body:minutes.listRuns(actor,Object.fromEntries(params))};
       if(path==='/api/minutes/connections')return {body:minutes.summary(actor)};
       const minuteRecord=path.match(/^\/api\/minutes\/records\/(\d+)(\/audio)?$/);
       if(minuteRecord){if(minuteRecord[2])return {audio:await minutes.audio(actor,Number(minuteRecord[1]),context,req.headers.range,()=>recheck())};return {body:minutes.detail(actor,Number(minuteRecord[1]),context)};}
@@ -355,6 +358,8 @@ export function createService(
     if(path.startsWith('/api/minutes/')&&method==='POST'){
       const existing=one(db,'SELECT * FROM mutations WHERE key=?',unique);if(existing)return {body:mutationResponse(existing)};
       if(path==='/api/minutes/personal/import')minutesPrepared=await minutes.prepare(actor,'personal-import',null,b,recheck);
+      const retryMinutesRun=path.match(/^\/api\/minutes\/runs\/([a-f0-9-]{36})\/retry$/);
+      if(retryMinutesRun){assert(Object.keys(b).length===0,'重试仅恢复原任务，不接受改变账号或同步范围');recheck();const body=await minutes.retryRun(actor,retryMinutesRun[1],{authorize:recheck});recheck();run(db,'INSERT INTO mutations VALUES(?,?,?,?)',unique,hash,JSON.stringify(body),now());return {body};}
       const syncRoute=path.match(/^\/api\/minutes\/sources\/([a-f0-9-]{36})\/(sync|history|range)$/);
       if(syncRoute){if(syncRoute[2]!=='range')assert(Object.keys(b).length===0,'听记读取不接受指定其他账号或组织');recheck();const body=syncRoute[2]==='range'?minutes.startRange(actor,syncRoute[1],b,{authorize:recheck}):syncRoute[2]==='history'?minutes.startHistory(actor,syncRoute[1],{authorize:recheck}):await minutes.sync(actor,syncRoute[1],{authorize:recheck});recheck();run(db,'INSERT INTO mutations VALUES(?,?,?,?)',unique,hash,JSON.stringify(body),now());return {body};}
       const prepareRoute=path.match(/^\/api\/minutes\/(?:authorizations\/([a-f0-9-]{36})\/(confirm)|records\/(\d+)\/(refresh|speaker-insights|quality|transcript))$/);

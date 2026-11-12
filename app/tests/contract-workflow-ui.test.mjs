@@ -25,6 +25,52 @@ const state=(contracts=[contract()],role='admin')=>({
   contractDashboard:{month:'2026-11',signed_amount:101000,received_amount:202000,outstanding_amount:303000,expiring_amount:404000,overdue_amount:505000},
 });
 
+test('从商机新增合同沿用业务字段与金额拆分，实际签约日及未知服务类型留待填写',()=>{
+  const S=state([]);
+  S.opportunities=[{id:7,customer_id:20,owner_id:2,collaborator_pm:3,code:'SJ-7',name:'协作产品',amount:100050,product_amount:60025,expected_date:'2026-11-12',order_type:'代销',sale_type:'新签分发'}];
+  const html=formContent(S,'convert',7);
+  assert.match(html,/甲客户 · SJ-7 · 预计签约 2026\.11\.12/);
+  assert.match(html,/name="name" type="text" value="协作产品"/);
+  assert.match(html,/name="owner_id"[^>]*>.*?<option value="2" selected>/s);
+  assert.match(html,/name="collaborator_pm"[^>]*>.*?<option value="3" selected>/s);
+  assert.match(html,/name="sale_type"[^>]*>.*?<option value="新签分发" selected>/s);
+  assert.match(html,/name="order_type"[^>]*>.*?<option value="代销" selected>/s);
+  assert.match(html,/实际签约日期.*?name="sign_date" type="date" value="" required/s);
+  const rows=html.split('<div class="item-row"').slice(1);
+  assert.equal(rows.length,2);
+  assert.match(rows[0],/value="协作产品".*?<option selected>标品.*?data-field="amount"[^>]*value="600\.25"/s);
+  assert.match(rows[1],/value="项目服务".*?data-field="amount"[^>]*value="400\.25"/s);
+  assert.doesNotMatch(rows[1],/<option selected>/);
+  assert.match(formContent({...S,actor:{id:2,role:'sales'}},'convert',7),/销售 销售甲/);
+  assert.doesNotMatch(formContent({...S,actor:{id:5,role:'sales'}},'convert',7),/<form/);
+});
+
+test('当前报价金额与商机一致时沿用折后明细，报价冲突或历史拆分未知时保留明确金额',()=>{
+  const S=state([]);
+  const opportunity={id:7,customer_id:20,owner_id:2,name:'协作产品',forecast_amount:100050,forecast_product_amount:60025};
+  S.opportunities=[opportunity];
+  S.quotes=[
+    {opportunity_id:7,is_current:false,amount:100050,items:[{name:'过往产品',kind:'标品',amount:60025},{name:'过往服务',kind:'运维',amount:40025}]},
+    {opportunity_id:7,is_current:true,amount:100050,items:[{name:'产品授权',kind:'标品',amount:60025},{name:'年度支持',kind:'运维',amount:40025}]},
+  ];
+  const fromQuote=formContent(S,'convert',7);
+  assert.match(fromQuote,/已带出当前报价明细/);
+  assert.match(fromQuote,/value="产品授权"/);
+  assert.match(fromQuote,/value="年度支持".*?<option selected>运维/s);
+  assert.doesNotMatch(fromQuote,/过往产品/);
+  S.quotes[1].valid_until='2026-10-01';
+  assert.doesNotMatch(formContent(S,'convert',7),/产品授权/);
+  delete S.quotes[1].valid_until;
+  opportunity.forecast_product_amount=50000;
+  assert.doesNotMatch(formContent(S,'convert',7),/产品授权/);
+  S.quotes=[];
+  opportunity.forecast_product_amount=null;
+  const unknown=formContent(S,'convert',7);
+  assert.equal((unknown.match(/class="item-row"/g)||[]).length,1);
+  assert.match(unknown,/data-field="amount"[^>]*value="1000\.5"/);
+  assert.doesNotMatch(unknown.split('id="contract-items"')[1],/<option selected>/);
+});
+
 test('合同总表完整展示业务列及操作，金额和日期各自对应字段而不从商机或其他金额推断',()=>{
   const html=contractList(state(),{tableView:'ledger'}),head=headers(html),row=tableRows(html)[0];
   assert.deepEqual(head,['客户名称 / 合同','订单类型','售卖产品','产品类型','产品续费标签','合同签订时间','回款时间','合同金额','产品金额','产品毛利率','产品毛利','项目／服务金额','项目／服务毛利','总毛利','付款类型','回款状态','已回款金额','产品到期时间','销售小二','合同附件','创建时间','操作']);

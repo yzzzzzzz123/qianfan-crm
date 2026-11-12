@@ -4,7 +4,7 @@ import {today} from '../domain.mjs';
 import {allocate,bandFor} from '../sales-policy.mjs';
 import {commissionInputs} from './commission-inputs.mjs';
 import {receiptMarginLedger,RECEIPT_MARGIN_SCHEME,roundRate,isServiceItem} from './receipt-margins.mjs';
-import {commissionDiagnostic,commissionTier} from './commission-diagnostics.mjs';
+import {commissionDiagnostic,commissionTier,createCommissionIssueRecorder,receiptDiagnosticDetails} from './commission-diagnostics.mjs';
 
 // This is a read model. Historical confirmation snapshots deliberately remain
 // untouched, and do not reduce the current entitlement shown on this page.
@@ -23,12 +23,9 @@ export function realtimeSalesCommissionPreviews(db,rules,actor,month,performance
     const fixedGrade=user.id===manager;
     const performance=fixedGrade?{grade:'A',status:'fixed',review_id:null}:performanceFor(db,rules,user,month),grade=performance.grade;
     const contractIssues=[],notices=[],productBases=[],serviceBases=[],evidence=[],unresolved=[],excludedContracts=[];
+    const issue=createCommissionIssueRecorder(contractIssues,user.id);
     const owned=contracts.filter(c=>c.owner_id===user.id);
     let productIncomplete=false,serviceIncomplete=false;
-    function issue(contract,code,message,{component=null,pending=true,...extra}={}) {
-      const value=commissionDiagnostic({contract_id:contract.id,contract_name:contract.name,code,message,display_message:`${contract.name}：${message}`,component,pending,...extra},{salesId:user.id});
-      if(!contractIssues.some(i=>i.contract_id===value.contract_id&&i.code===code&&i.message===message))contractIssues.push(value);
-    }
     function unresolvedLine(contract,component,message,base=null) {
       unresolved.push({item_id:null,contract_id:contract.id,contract_name:contract.name,owner_id:user.id,product:'待完善依据',component,base,rate:null,entitlement:null,amount:null,known:false,amount_pending:true,provisional:true,pending_reason:message});
     }
@@ -44,12 +41,9 @@ export function realtimeSalesCommissionPreviews(db,rules,actor,month,performance
       }
       for(const claim of claims){issue(contract,'receipt_source_claim',claim.reason);unresolvedLine(contract,'unknown',claim.reason);productIncomplete=true;serviceIncomplete=true;}
       for(const receipt of actual){
-        const {items,...proof}=receipt;evidence.push(proof);
-        const diagnostics=receipt.issues.filter(v=>!v.startsWith('服务毛利或服务金额缺失'));
-        for(const message of diagnostics){
-          const code=/日期/.test(message)?'receipt_date_missing':/分配/.test(message)?'receipt_split_missing':/超过/.test(message)?'receipt_split_exceeded':/分类|明细/.test(message)?'contract_items_incomplete':'margin_missing';
-          issue(contract,code,message,{payment_id:receipt.payment_id});
-        }
+        const {items,diagnostics:ledgerDiagnostics,...proof}=receipt;evidence.push(proof);
+        const diagnostics=ledgerDiagnostics.filter(i=>i.code!=='team_service_margin_missing');
+        for(const diagnostic of diagnostics)issue(contract,diagnostic.code,diagnostic.message,receiptDiagnosticDetails(receipt,diagnostic,contract.sign_date));
         if(receipt.source_basis)issue(contract,'source_split','合同明细尚待补齐，当前仅按已核验来源暂算');
         const append=(component,base,rows)=>{
           if(base===null){const reason=component==='product'?'产品回款毛利依据待补齐':'开发运维实际回款依据待补齐';unresolvedLine(contract,component,reason);if(component==='product')productIncomplete=true;else serviceIncomplete=true;return;}
@@ -57,7 +51,7 @@ export function realtimeSalesCommissionPreviews(db,rules,actor,month,performance
           const result=allocate(base,rows).map(i=>({...i,contract_name:contract.name,owner_id:user.id,component,provisional:!!receipt.source_basis}));
           (component==='product'?productBases:serviceBases).push(...result);
         };
-        if(!receipt.allocation_valid){unresolvedLine(contract,'unknown',diagnostics.join('；')||'本笔到账依据待补齐');productIncomplete=true;serviceIncomplete=true;continue;}
+        if(!receipt.allocation_valid){unresolvedLine(contract,'unknown',diagnostics.map(i=>i.message).join('；')||'本笔到账依据待补齐');productIncomplete=true;serviceIncomplete=true;continue;}
         append('product',receipt.product_gross_margin,items.filter(i=>i.kind==='标品'));
         if(receipt.service_received>0&&!receipt.service_classification_confirmed){unresolvedLine(contract,'service','服务分类待核对，仅定开、运维属于开发运维');serviceIncomplete=true;}
         else append('service',receipt.service_received,items.filter(isServiceItem));

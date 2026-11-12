@@ -101,15 +101,17 @@ test("M02-A03 中文客户创建后可回读，重复客户与信用代码被拒
   );
 });
 
-test("M02-A04 客户归属调整同步商机与合同，并撤销原销售可见范围", async (t) => {
+test("M02-A04 明确核对后连带移交业务，并撤销原销售可见范围", async (t) => {
   const f = await fixture(t);
   const actor = await f.login(1);
+  const preview = await f.request("/customers/1/transfer-preview?owner_id=3", { actor });
+  assert.equal(preview.status, 200);
   assert.equal(
     (
       await f.request("/customers/1", {
         actor,
         method: "PATCH",
-        body: { owner_id: 3, reason: "分工调整" },
+        body: { owner_id: 3, reason: "分工调整", ownership_scope: "linked_records", ownership_confirmed: true, transfer_preview_token: preview.body.preview_token },
       })
     ).status,
     200,

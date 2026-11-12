@@ -59,7 +59,7 @@ export function handleOpportunities(context) {
       updated_at: now(),
     });
     insert('stage_history',{opportunity_id:id,from_stage:null,to_stage:stage,at:now()});
-    audit(actor, "创建商机", "opportunity", id, { name: b.name });
+    audit(actor, "创建商机", "opportunity", id, { name: b.name,owner_id });
     return { id, message: "商机已创建" };
   }
   if ((m = path.match(/^\/api\/opportunities\/(\d+)$/)) && method === "PATCH") {
@@ -73,13 +73,16 @@ export function handleOpportunities(context) {
       const stage = choice(b.stage, STAGES, "阶段");
       assert(
         stage !== "赢单" || o.stage === "赢单",
-        "请先归档双方盖章合同，再确认赢单",
+        "请先登记已签署合同，保存后自动赢单；签章附件可后补",
       );
       if (stage !== o.stage) {
         assert(
           !["赢单", "输单"].includes(o.stage),
           "已结束商机不能直接重新推进",
         );
+        const flow=['线索','需求','方案','商务'],from=flow.indexOf(o.stage),to=flow.indexOf(stage);
+        if(stage==='搁置'||from>=0&&to>=0&&to!==from+1)
+          text(b.reason,'跨级、回退或搁置原因',1000);
         row.stage = stage;
         row.stage_at = now();
         insert('stage_history',{opportunity_id:o.id,from_stage:o.stage,to_stage:stage,at:now()});
@@ -127,6 +130,8 @@ export function handleOpportunities(context) {
     audit(actor, "更新商机", "opportunity", o.id, {
       fields: Object.keys(row),
       reason: b.reason || "",
+      before:Object.fromEntries(Object.keys(row).map(key=>[key,o[key]])),
+      after:row,
       ...(row.lost_reason !== undefined ? { lost_reason: { before: o.lost_reason || "", after: row.lost_reason } } : {}),
     });
     return { id: o.id, message: "商机已更新" };

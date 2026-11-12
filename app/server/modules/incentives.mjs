@@ -1,12 +1,14 @@
 import {assertContractDataAccess,canManageContractData} from '../contract-access.mjs';
 import { createHash } from 'node:crypto';
 import { all, one } from '../database.mjs';
-import { assert, cents, choice, now, period, today, text, validDate, processScore } from '../domain.mjs';
-import {salesCommissionPreviews,realtimeSalesCommissionPreviews} from './sales-commissions.mjs';
+import { assert, cents, choice, now, period, today, text, validDate } from '../domain.mjs';
+import {salesCommissionPreviews,realtimeSalesCommissionPreviews,realtimeTeamCommissionPreview} from './sales-commissions.mjs';
 import {realtimeLegacyCommissionPreviews} from './commission-realtime-legacy.mjs';
 import {performancePolicy,performanceDefaults} from '../../public/modules/performance-policy.js';
 import {commissionReceiptReview} from './commission-receipts.mjs';
 import {commissionInputs} from './commission-inputs.mjs';
+import {processLedger} from '../performance-ledger.mjs';
+import {performanceInputs} from '../performance-inputs.mjs';
 
 export const managerId = (db, rules) => one(db,"SELECT id FROM users WHERE id=? AND active=1 AND role='admin' AND business_member=1 AND developer_admin=0",rules.commission.manager_id||0)?.id || one(db,"SELECT id FROM users WHERE active=1 AND role='admin' AND business_member=1 AND developer_admin=0 ORDER BY id LIMIT 1")?.id;
 export function incentivePeriod(day = today(), mode = 'quarter') {
@@ -15,6 +17,8 @@ export function incentivePeriod(day = today(), mode = 'quarter') {
 const digest = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 export function commissionPreview(db, rules, actor, requested) {
   const policy = rules.commission;
+  let sharedScoringInputs;
+  const calculatePerformance=(db,rules,user,month)=>performanceFor(db,rules,user,month,{inputs:sharedScoringInputs??=performanceInputs(db)});
   const selected = requested || (policy.sales_policy && period()>=policy.sales_policy.effective_month ? period() : incentivePeriod(today(), policy.period));
   assert(/^\d{4}(?:Q[1-4]|-(?:0[1-9]|1[0-2]))?$/.test(selected),'提成周期无效');
   const manager = managerId(db,rules);
@@ -57,7 +61,7 @@ export function commissionPreview(db, rules, actor, requested) {
     const fingerprint=digest({user:user.id,kind,selected:legacyPeriod,policy,lines,confirmed});
     result.push({sales_id:user.id,name:user.name,kind,period:legacyPeriod,scheme:'legacy',base:baseSum,rate,total,confirmed,paid:locked.filter(b=>b.status==='paid').reduce((s,b)=>s+b.amount,0),due,lines,fingerprint,blocked:due<0||lines.some(l=>l.amount<0),unlock_by_payment:policy.unlock_by_payment});
   }
-  if(monthly)result.unshift(...salesCommissionPreviews(db,rules,actor,selected,performanceFor,manager));
+  if(monthly)result.unshift(...salesCommissionPreviews(db,rules,actor,selected,calculatePerformance,manager));
   const salesBasis=monthly?commissionInputs(db,selected).basis.filter(p=>actor.role==='admin'||actor.role==='sales'&&p.sales_id===actor.id):[];
   const prepared=result.map(p=>{
     const basis=p.kind==='personal'?salesBasis.find(b=>b.sales_id===p.sales_id):null;
@@ -66,7 +70,9 @@ export function commissionPreview(db, rules, actor, requested) {
   });
   const previews=trialOnly?prepared.map(p=>({...p,blocked:true,trial_only:true,issues:[...(p.issues||[]),'所选月份早于规则生效月份，仅按现行 SOP 补算试算，不可确认结算'],fingerprint:digest({fingerprint:p.fingerprint,trial_only:true})})):prepared;
   const visibleBatches=batches.filter(b=>actor.role==='admin'||(actor.role==='sales'&&b.sales_id===actor.id)).map(b=>({...b,snapshot:JSON.parse(b.snapshot)}));
-  const realtimeRows=[...(monthly?realtimeSalesCommissionPreviews(db,rules,actor,selected,performanceFor,manager):[]),...realtimeLegacyCommissionPreviews(db,rules,actor,selected,previews)];
+  const realtimeRows=monthly
+    ? [...realtimeSalesCommissionPreviews(db,rules,actor,selected,calculatePerformance,manager),...prepared.filter(p=>p.kind==='management').map(realtimeTeamCommissionPreview)]
+    : realtimeLegacyCommissionPreviews(db,rules,actor,selected,previews);
   const realtime_previews=realtimeRows.map(p=>{
     const historical=visibleBatches.filter(b=>b.sales_id===p.sales_id&&b.kind===p.kind&&b.period===p.period);
     const paid=historical.filter(b=>b.status==='paid').reduce((s,b)=>s+b.amount,0);
@@ -79,31 +85,31 @@ export function commissionPreview(db, rules, actor, requested) {
 export function performanceFor(db,rules,user,month=period(),options={}) {
   assert(/^\d{4}-(0[1-9]|1[0-2])$/.test(month),'绩效月份无效');
   const review=one(db,'SELECT * FROM performance_reviews WHERE user_id=? AND month=?',user.id,month);
-  if(review?.status==='confirmed'&&!options.recalculate) return {...JSON.parse(review.snapshot),review_id:review.id,status:'confirmed'};
-  const opps=all(db,'SELECT * FROM opportunities WHERE archived_at IS NULL');
-  const activeOpportunityIds=new Set(opps.map(o=>o.id));
-  const events=all(db,'SELECT * FROM activity_events');
-  const tracked=new Set(events.map(e=>e.activity_id));
-  const legacy=all(db,"SELECT * FROM activities WHERE activity_type!='系统'").filter(a=>!tracked.has(a.id));
-  const activities=[...events.map(e=>({...e,user_id:e.credited_user_id})),...legacy].filter(a=>activeOpportunityIds.has(a.opportunity_id));
-  const quotes=all(db,'SELECT * FROM quotes').filter(q=>activeOpportunityIds.has(q.opportunity_id));
-  const p=performancePolicy(rules.performance);
-  const process=processScore(opps,activities,quotes,user.id,month,p);
+  const review_meta=review?{user_id:review.reviewed_by,user_name:one(db,'SELECT name FROM users WHERE id=?',review.reviewed_by)?.name||'管理员',updated_at:review.updated_at,confirmed_at:review.status==='confirmed'?review.updated_at:null}:null;
+  if(review?.status==='confirmed'&&!options.recalculate) {
+    const snapshot=JSON.parse(review.snapshot);
+    return {...snapshot,review_id:review.id,status:'confirmed',inactive:user.active===0,updated_at:review.updated_at,review_meta,grade_rules_snapshot:snapshot.grade_rules_snapshot||null,snapshot_legacy:!snapshot.score_ledger};
+  }
+  const inputs=options.inputs||performanceInputs(db),p=performancePolicy(rules.performance);
+  const detail=processLedger(inputs.opportunities,inputs.activities,inputs.quotes,user.id,month,p),process=detail.process;
+  const score_ledger=detail.score_ledger.filter(x=>x.category!=='other').map(x=>({...x,recorder_name:inputs.users.get(x.recorded_user_id)?.name||'历史登记人',credited_name:inputs.users.get(x.credited_user_id)?.name||'未分配'}));
   const raw=Math.min(p.cap,review?.adjustment??process.raw);
   const processPoints=Math.round(raw/p.cap*p.process_weight*100)/100;
   const q=`${month.slice(0,4)}Q${Math.ceil(Number(month.slice(5,7))/3)}`;
   const quarterly=one(db,'SELECT amount FROM targets WHERE user_id=? AND quarter=?',user.id,q)?.amount||0;
-  const contracts=all(db,"SELECT id,name,amount,sign_date FROM contracts WHERE retired_at IS NULL AND lifecycle!='草稿' AND owner_id=? AND substr(sign_date,1,7)=? AND sign_date<=?",user.id,month,today());
+  const contracts=all(db,"SELECT id,name,amount,sign_date,terminated_at FROM contracts WHERE retired_at IS NULL AND lifecycle!='草稿' AND owner_id=? AND substr(sign_date,1,7)=? AND sign_date<=?",user.id,month,today());
   const actual=contracts.reduce((s,c)=>s+c.amount,0);
   const achievement=quarterly?actual*3/quarterly:null;
   const resultPoints=achievement===null?null:achievement*p.result_weight;
   const automaticTotal=resultPoints===null?null:Math.round((processPoints+resultPoints)*100)/100;
+  const systemTotal=resultPoints===null?null:Math.round((process.weighted+resultPoints)*100)/100;
   const total=quarterly?(review?.final_score??automaticTotal):null;
   const grade=total===null?null:p.grades.find(g=>total>=g.min);
   const eligible=user.role==='sales' && user.performance_enabled!==0 && user.business_member!==0 && user.developer_admin!==1;
   const priorDate=new Date(`${month}-15T12:00:00Z`);priorDate.setUTCMonth(priorDate.getUTCMonth()-1);
   const prev=one(db,"SELECT snapshot FROM performance_reviews WHERE user_id=? AND month=? AND status='confirmed'",user.id,priorDate.toISOString().slice(0,7));
-  return {user_id:user.id,name:user.name,month,process,raw,processPoints,resultPoints:eligible?resultPoints:null,automatic_total:eligible?automaticTotal:null,final_score:review?.final_score??null,total:eligible?total:null,grade:eligible?grade?.grade||null:null,salary_factor:eligible?grade?.factor??null:null,eligible,quarterly_target:quarterly,monthly_target:Math.round(quarterly/3),actual,achievement,adjustment:review?.adjustment??null,adjustment_limited:review?.adjustment>p.cap,calculation_rules:Object.fromEntries(Object.keys(performanceDefaults).map(k=>[k,p[k]])),reason:review?.reason||'',status:'draft',consecutive_d:!!(eligible&&grade?.grade==='D'&&prev&&JSON.parse(prev.snapshot).grade==='D'),evidence:{contracts,meetings:activities.filter(a=>a.user_id===user.id&&a.activity_type==='线上会议'&&a.activity_date.startsWith(month)),visits:activities.filter(a=>a.user_id===user.id&&a.activity_type==='现场拜访'&&a.activity_date.startsWith(month)),opportunities:opps.filter(o=>o.owner_id===user.id&&o.created_at.slice(0,7)===month),quotes:[...quotes.filter(q=>q.user_id===user.id&&q.created_at.startsWith(month)),...activities.filter(a=>a.user_id===user.id&&a.activity_type==='对客报价'&&a.activity_date.startsWith(month)&&!quotes.some(q=>q.user_id===user.id&&q.opportunity_id===a.opportunity_id&&q.created_at.slice(0,10)===a.activity_date))]}};
+  const evidenceOf=category=>score_ledger.filter(x=>x.category===category).map(x=>({...x,id:x.source_id,user_id:x.recorded_user_id,name:x.kind==='activity'?undefined:x.title,summary:x.title,activity_date:x.date}));
+  return {user_id:user.id,name:user.name,review_id:review?.id||null,month,process,raw,automatic_raw:process.raw,uncapped_raw:detail.uncapped_raw,category_scores:detail.category_scores,score_ledger,processPoints,resultPoints:eligible?resultPoints:null,automatic_total:eligible?automaticTotal:null,system_total:eligible?systemTotal:null,final_score:review?.final_score??null,total:eligible?total:null,grade:eligible?grade?.grade||null:null,salary_factor:eligible?grade?.factor??null:null,eligible,inactive:user.active===0,missing_reason:!eligible?'不参与绩效':!quarterly?`缺少 ${q} 合同额目标`:null,quarterly_target:quarterly,monthly_target:Math.round(quarterly/3),actual,achievement,adjustment:review?.adjustment??null,adjustment_limited:review?.adjustment>p.cap,calculation_rules:Object.fromEntries(Object.keys(performanceDefaults).map(k=>[k,p[k]])),grade_rules_snapshot:p.grades,reason:review?.reason||'',review_meta,status:'draft',updated_at:now(),consecutive_d:!!(eligible&&grade?.grade==='D'&&prev&&JSON.parse(prev.snapshot).grade==='D'),evidence:{contracts,meetings:evidenceOf('meeting'),visits:evidenceOf('visit'),opportunities:evidenceOf('funnel'),quotes:evidenceOf('quote')}};
 }
 
 function correctionAccess(db,contractId,context){
@@ -142,13 +148,14 @@ export function handleIncentives(ctx) {
     assert(adjustment===null||Number.isFinite(adjustment)&&adjustment>=0&&adjustment<=getRules().performance.cap,'过程调整分须在0至满分之间');
     const final_score=b.final_score===undefined||b.final_score===null||b.final_score===''?null:Number(b.final_score);
     assert(final_score===null||Number.isFinite(final_score)&&final_score>=0&&final_score<=100,'最终总分须为0至100');
-    const reason=text(b.reason||'','调整原因',1000,adjustment!==null||final_score!==null);
+    const restoring=(value.adjustment!==null||value.final_score!==null)&&adjustment===null&&final_score===null;
+    const reason=text(b.reason||'','调整原因',1000,adjustment!==null||final_score!==null||restoring);
     const existing=one(db,'SELECT id FROM performance_reviews WHERE user_id=? AND month=?',user.id,month);
     const row={user_id:user.id,month,adjustment,final_score,reason,status:'draft',reviewed_by:actor.id,updated_at:now()};
     const id=existing?.id||insert('performance_reviews',row);if(existing) update('performance_reviews',id,row);
     const calculated=performanceFor(db,getRules(),user,month);
     if(status==='confirmed') {assert(month<period(),'月份结束后才可确认绩效');assert(calculated.total!==null,'请先配置该季度合同额目标');update('performance_reviews',id,{status,snapshot:JSON.stringify(calculated)});}
-    audit(actor,status==='confirmed'?'确认月度绩效':'调整过程绩效','performance',id,{user_id:user.id,month,adjustment,final_score,reason});
+    audit(actor,status==='confirmed'?'确认月度绩效':'调整过程绩效','performance',id,{user_id:user.id,month,adjustment,final_score,reason,restored_automatic:restoring,before:{adjustment:value.adjustment,final_score:value.final_score,total:value.total,grade:value.grade,salary_factor:value.salary_factor},after:{adjustment:calculated.adjustment,final_score:calculated.final_score,total:calculated.total,grade:calculated.grade,salary_factor:calculated.salary_factor}});
     return {id,message:status==='confirmed'?'月度绩效已确认锁定':'过程评分已调整'};
   }
 }

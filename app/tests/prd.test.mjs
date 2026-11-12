@@ -74,10 +74,11 @@ test('直接设置绩效校验权限和分数，重复保存不新增，清空�
     assert.equal(row.adjustment,adjustment);assert.equal(row.reviewed_by,1);assert.equal(row.status,'draft');
   }
   assert.equal(one(f.db,'SELECT count(*) n FROM performance_reviews WHERE user_id=?',uid).n,1);
+  assert.equal((await save({adjustment:''})).status,400);
   for(const adjustment of ['',null]) {
-    assert.equal((await save({adjustment})).status,200);
+    assert.equal((await save({adjustment,reason:'恢复系统自动计分'})).status,200);
     const p=(await state(f,admin)).performance.find(p=>p.user_id===uid);
-    assert.equal(p.adjustment,null);assert.equal(p.raw,p.process.raw);assert.equal(p.reason,'');
+    assert.equal(p.adjustment,null);assert.equal(p.raw,p.process.raw);assert.equal(p.reason,'恢复系统自动计分');
   }
   assert.equal(one(f.db,"SELECT count(*) n FROM audit WHERE entity='performance' AND entity_id=(SELECT id FROM performance_reviews WHERE user_id=?)",uid).n,4);
   for(const field of ['performance_enabled','active']) {

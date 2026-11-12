@@ -66,7 +66,7 @@ test('赢单输单搁置不计推进风险，仍在跟的关键人触达提醒�
       assert.equal(member.riskCount,expected);
     }
   }
-  run(f.db,"UPDATE opportunities SET stage='需求',stage_at=?,created_at=?,follow_date=NULL WHERE id=?",now(),now(),oid);
+  run(f.db,"UPDATE opportunities SET stage='需求',stage_at=?,created_at=?,follow_date=NULL,expected_date=? WHERE id=?",now(),now(),dateAdd(10),oid);
   const state=(await f.request('/state',{actor})).body;
   const active=state.opportunities.find(o=>o.id===oid);
   assert.equal(active.risk.level,'attention');

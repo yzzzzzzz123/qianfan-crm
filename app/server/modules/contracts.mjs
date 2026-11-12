@@ -62,8 +62,8 @@ function syncSignedContract(context,contract,{filing=false}={}){
     update('opportunities',opportunity.id,{stage:'赢单',amount:total,next_action:'跟进合同履约、验收与回款节点',follow_date:null,stage_at:opportunity.stage==='赢单'?opportunity.stage_at:at,updated_at:at});
     insert('activities',{opportunity_id:opportunity.id,user_id:actor.id,source:'系统里程碑',activity_type:'系统',summary:`${filing?'已确认签署合同':'已登记签署合同'} ${contract.contract_no||code('HT',contract.id,contract.created_at)}`,action:'明确交付与回款节点',activity_date:today(),created_at:at});
   }
-  const customer=one(db,'SELECT owner_id FROM customers WHERE id=?',contract.customer_id);
-  if(customer&&(actor.role==='admin'||customer.owner_id===actor.id))update('customers',contract.customer_id,{status:'成交',updated_at:at});
+  const customer=one(db,'SELECT owner_id,status FROM customers WHERE id=?',contract.customer_id);
+  if(customer&&!['流失','冻结'].includes(customer.status)&&(actor.role==='admin'||customer.owner_id===actor.id))update('customers',contract.customer_id,{status:'成交',updated_at:at});
 }
 /** contracts: unmatched routes return undefined; transaction and idempotency are owned by service.mjs. */
 export function handleContracts(context) {

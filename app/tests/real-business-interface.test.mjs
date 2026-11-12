@@ -11,14 +11,14 @@ test('商机界面使用真实表业务字段，空分类与未知销售不猜�
   for(const field of ['name','owner_id','amount','product_amount','sale_type','order_type','expected_date','collaborator_pm'])assert.match(form,new RegExp(`name="${field}"`),field);
   assert.doesNotMatch(form,/name="(?:est_margin|product_type|source|nature|products|deal_type)"/);
   assert.match(form,/name="sale_type" required/);assert.match(form,/name="order_type" required/);
-  assert.match(form,/cash金额（元）/);assert.match(form,/<input[^>]*name="product_amount"[^>]*required/);
+  assert.match(form,/预计产品金额（元）/);assert.match(form,/<input[^>]*name="product_amount"[^>]*required/);
   assert.match(form,/<input[^>]*name="product_amount"[^>]*value=""/);
   assert.doesNotMatch(form,/<option value="赢单"/);
-  const o={...S.opportunities[0],owner_id:null,product_amount:null,sale_type:null,order_type:null};
+  const o={...S.opportunities[0],owner_id:null,product_amount:null,forecast_product_amount:null,sale_type:null,order_type:null};
   const html=opportunityDetail({...S,opportunities:[o]},o.id);
-  assert.match(html,/销售 未分配/);assert.match(html,/cash金额<\/span><b>未提供/);
+  assert.match(html,/销售 未分配/);assert.match(html,/预计产品金额<\/span><strong>未提供/);
   const list=oppTable({...S,opportunities:[o]},[o]);
-  assert.match(list,/cash金额 未提供/);assert.doesNotMatch(list,/cash金额 ¥0/);
+  assert.match(list,/预计产品 未提供/);assert.doesNotMatch(list,/预计产品 ¥0/);
   assert.match(html,/销售类型<\/dt><dd>待补充/);assert.doesNotMatch(html,/PPL|镜像|申请骨架变更|预估毛利/);
 });
 test('金额漏斗按金额缩放，赢单输单和搁置不混入在跟进金额',()=>{

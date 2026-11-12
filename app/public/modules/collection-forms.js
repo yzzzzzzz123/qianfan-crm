@@ -51,7 +51,7 @@ export function collectionForm(S,type,id){
     const parent=S.contracts.find(c=>c.payments.some(p=>p.id===Number(id))),p=parent?.payments.find(p=>p.id===Number(id));
     if(!canManageContract(S,parent)||!p)return empty('此记录仅保留历史，不能改写');
     const received=p.status==='已到账';
-    return formShell(received?'纠正到账录入':'调整收款计划',parent.name,context(S,parent)+
+    return formShell(received?'纠正到账录入':'调整收款计划',received?`${parent.name} · 收款 #${p.id}`:parent.name,context(S,parent)+
       (received?notice('用于修正原录入错误，变更前后与原因会保留。真实退款请保留原收款并另行核对。'):notice(`原计划已核销 ${plainMoney(p.settled_amount||0)}，调整后的计划总额不能低于已核销金额。`))+
       input('amount',received?'本笔实际到账金额（元）':'计划总金额（元）',p.amount/100,'number',true,'min="0.01" step="0.01"')+
       `<input type="hidden" name="status" value="${received?'已到账':p.raw_status||p.status}">`+

@@ -39,10 +39,10 @@ test('当前客户筛选只使用手动等级，不把来源旧等级当成当�
 
 test('客户资产分级使用手动等级，并让未标注客户保持未填写',()=>{
  const html=renderPage(state(),{view:'assets'});
- const distribution=html.match(/客户分级[^]*?<div class="industry-list">([^]*?)<\/div><\/section>/)?.[1];
+ const distribution=html.match(/<details class="management-structure">\s*<summary>客户分级[^]*?<ul>([^]*?)<\/ul>/)?.[1];
  assert.ok(distribution);
- assert.match(distribution,/<span>A<\/span><b>1 家/);
- assert.match(distribution,/<span>未填写<\/span><b>1 家/);
+ assert.match(distribution,/>A <b>1 家/);
+ assert.match(distribution,/>未填写 <b>1 家/);
  assert.doesNotMatch(distribution,/旧等级/);
 });
 

@@ -98,7 +98,7 @@ test('已有历史cash和分类缺失不阻止维护其他字段，不猜补零�
   f.db.exec('BEGIN');for(const name of names)f.db.exec('DROP TRIGGER '+name);
   f.db.exec('UPDATE opportunities SET product_amount=NULL,sale_type=NULL,order_type=NULL WHERE id=1');
   for(const sql of triggers)f.db.exec(sql);f.db.exec('COMMIT');
-  const response=await f.request('/opportunities/1',{actor,method:'PATCH',body:{name:'维护已有历史商机',next_action:'补记本次跟进',stage:'需求',amount:100000}});
+  const response=await f.request('/opportunities/1',{actor,method:'PATCH',body:{name:'维护已有历史商机',next_action:'补记本次跟进',stage:'需求',amount:100000,reason:'补记历史商机并核对阶段回退'}});
   assert.equal(response.status,200,JSON.stringify(response.body));
   const historical=one(f.db,'SELECT name,next_action,stage,product_amount,sale_type,order_type FROM opportunities WHERE id=1');
   assert.deepEqual({...historical},{name:'维护已有历史商机',next_action:'补记本次跟进',stage:'需求',product_amount:null,sale_type:null,order_type:null});

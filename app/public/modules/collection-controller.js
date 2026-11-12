@@ -1,5 +1,6 @@
 import {esc,plainMoney,dateLabel,customerName} from '../ui.js';
 import {isOpenPlan,planRemaining,contractCaption} from './collection-forms.js';
+import {bindCommittedSearch} from './search-input.js';
 
 const centValue=el=>!el||el.value===''?null:Math.round(Number(el.value)*100);
 function required(el,on){
@@ -64,15 +65,18 @@ export function mountCollectionForm(form,S){
   if(!form)return;
   sync(form,S);
   const eligible=()=>S.contracts.filter(c=>c.lifecycle!=='草稿'&&(c.outstanding>0||c.outstanding==null)&&(form.dataset.form!=='payment-plan-create'||!c.terminated_at));
+  bindCommittedSearch(form,'[data-contract-search]',search=>{
+    const error=form.querySelector('.form-error');if(error)error.textContent='';
+    const select=form.elements.contract_id,previous=select.value,q=search.value.trim().toLowerCase();
+    const rows=eligible().filter(c=>contractCaption(S,c).toLowerCase().includes(q));
+    select.innerHTML='<option value="">请选择合同</option>'+rows.map(c=>`<option value="${c.id}">${esc(contractCaption(S,c))}</option>`).join('');
+    select.value=rows.some(c=>String(c.id)===previous)?previous:'';
+    sync(form,S);
+  });
   form.addEventListener('input',e=>{
+    if(e.target.matches('[data-contract-search]'))return;
     const error=form.querySelector('.form-error');if(error)error.textContent='';
     if(['amount','reference_no','pay_date'].includes(e.target.name))form.dataset.forceDuplicate='false';
-    if(e.target.matches('[data-contract-search]')){
-      const select=form.elements.contract_id,previous=select.value,q=e.target.value.trim().toLowerCase();
-      const rows=eligible().filter(c=>contractCaption(S,c).toLowerCase().includes(q));
-      select.innerHTML='<option value="">请选择合同</option>'+rows.map(c=>`<option value="${c.id}">${esc(contractCaption(S,c))}</option>`).join('');
-      select.value=rows.some(c=>String(c.id)===previous)?previous:'';
-    }
     sync(form,S);
   });
   form.addEventListener('change',e=>{
@@ -92,9 +96,9 @@ export function showCollectionError(form,error){
   section.querySelector('.duplicate-description').textContent=error.message;
   for(const input of [form.elements.duplicate_confirmed,form.elements.duplicate_reason]){input.disabled=false;required(input,true);}
 }
-export async function contractFile(form){
+export async function contractFile(form,label='合同附件'){
   const file=form.querySelector('input[type=file][name=file]')?.files?.[0];if(!file)return null;
-  if(file.size>10*1024*1024)throw new Error('单个合同附件不能超过10MB，请压缩后重试。');
+  if(file.size>10*1024*1024)throw new Error(`单个${label}不能超过10MB，请压缩后重试。`);
   if(form.dataset.form==='archive-contract'&&!/\.(pdf|png|jpe?g|webp)$/i.test(file.name))throw new Error('归档签章件须为PDF或图片；其他原件可先作为合同附件保存。');
   const base64=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onerror=()=>reject(new Error('文件读取失败，请重新选择'));reader.onload=()=>resolve(String(reader.result).split(',')[1]);reader.readAsDataURL(file);});
   return {name:file.name,base64};

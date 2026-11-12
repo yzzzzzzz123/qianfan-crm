@@ -122,10 +122,10 @@ test('近期核对覆盖周末延迟内容及长时间停机缺口，保持首�
   const runs=Array.from({length:6},()=>({status:'failed',finished_at:new Date(at).toISOString()}));assert.equal(minutesSourceSchedule(runs,{automatic:true,configured:true,connected:true,at}).next_update_at,new Date(at+60*minute).toISOString());
 });
 
-test('更新状态保留在接口，日常听记页隐藏连接区域且失败记录经过转义',async t=>{
+test('更新状态保留在接口并提供简明连接状态，失败记录经过转义',async t=>{
   const f=await context(t),id=f.add();f.upstream.fail.add(id);await f.service.scheduledSync();
   run(f.db,"UPDATE minutes_sync_runs SET error_message='<script>source secret</script>'");
   const S={actor:f.actor(2),users:[f.actor(2)],minutes:f.service.summary(f.actor(2))};
-  let html=minutesPage(S,{minutesTab:'runs'});assert.equal(S.minutes.sources[0].schedule.state,'retrying');assert.doesNotMatch(html,/钉钉账号连接|下次更新/);assert.doesNotMatch(html,/<script>/);assert.match(html,/&lt;script&gt;/);
+  let html=minutesPage(S,{minutesTab:'runs'});assert.equal(S.minutes.sources[0].schedule.state,'retrying');assert.match(html,/data-minutes-connections/);assert.match(html,/最近同步失败/);assert.doesNotMatch(html,/<script>/);assert.match(html,/&lt;script&gt;/);
   S.minutes.sources[0].schedule={state:'local',next_update_at:null,last_error:''};html=minutesPage(S,{});assert.doesNotMatch(html,/本地预览 · 定时更新在服务器运行/);assert.doesNotMatch(html,/下次更新/);
 });

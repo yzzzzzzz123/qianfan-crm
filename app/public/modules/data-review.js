@@ -1,4 +1,5 @@
 import {esc,plainMoney,dateLabel,badge,actionButton as button,input,select,textarea,formShell,empty} from '../ui.js';
+import {bindCommittedSearch} from './search-input.js';
 
 const style='<link rel="stylesheet" href="./modules/data-review.css">';
 const money=value=>value==null?'待核对':plainMoney(value);
@@ -134,7 +135,8 @@ export function mountReviewList(root){
   if(!root||root.dataset.reviewMounted)return;root.dataset.reviewMounted='true';
   const filter=()=>{const q=(root.querySelector('[data-review-search-input]')?.value||'').trim().toLowerCase(),issues=root.querySelector('[data-review-issues-only]')?.checked;let count=0;for(const row of root.querySelectorAll('[data-review-record]')){row.hidden=!!(q&&!row.dataset.reviewSearch.includes(q)||issues&&row.dataset.reviewIssues!=='yes');if(!row.hidden)count++;}const counter=root.querySelector('[data-review-filter-count]');if(counter)counter.textContent=`${count}份合同`;const noMatch=root.querySelector('[data-review-no-match]');if(noMatch)noMatch.hidden=count>0;};
   const totals=()=>{const rows=[...root.querySelectorAll('[data-review-item]')];let amount=0,expense=0,margin=0,unknown=false;rows.forEach((row,index)=>{const a=Number(rowValue(row,'amount')),base=rowValue(row,'margin_before_expense'),e=Number(row.dataset.reviewExpense||0),newDelivery=!row.dataset.reviewId&&['实施','交付'].includes(rowValue(row,'kind')),m=base===''?newDelivery?Math.round(a*100):null:Math.round(Number(base)*100);amount+=Math.round(a*100);expense+=e;if(m==null)unknown=true;else margin+=m-e;const n=row.querySelector('[data-review-item-number]');if(n)n.textContent=index+1;const p=row.querySelector('[data-review-margin-preview]');if(p)p.textContent=m==null?'待核对':money(m-e);});const total=root.querySelector('[data-review-item-total]');if(total)total.textContent=`合同合计 ${money(amount)} · 费用 ${money(expense)} · 扣费后毛利 ${unknown?'待核对':money(margin)}`;};
-  root.addEventListener('input',event=>{if(event.target.matches('[data-review-search-input]'))filter();if(event.target.closest('[data-review-item]'))totals();});
+  bindCommittedSearch(root,'[data-review-search-input]',filter);
+  root.addEventListener('input',event=>{if(event.target.closest('[data-review-item]'))totals();});
   root.addEventListener('change',event=>{if(event.target.matches('[data-review-issues-only]'))filter();if(event.target.closest('[data-review-item]'))totals();});
   root.addEventListener('click',event=>{const add=event.target.closest('[data-review-add-item]'),remove=event.target.closest('[data-review-remove-item]');if(add){event.preventDefault();root.querySelector('[data-review-items]')?.insertAdjacentHTML('beforeend',itemRow());totals();}if(remove){event.preventDefault();const row=remove.closest('[data-review-item]');if(root.querySelectorAll('[data-review-item]').length===1){const error=root.querySelector('.form-error');if(error)error.textContent='合同至少保留一条明细';return;}row.remove();totals();}});
   totals();

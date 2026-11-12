@@ -6,17 +6,32 @@ import {reviewList,mountReviewList,reviewEditor,collectReviewChange,reviewQueue,
 import {installProfitEditors} from './modules/profit-editor.js';
 import {formShell,textarea} from './ui.js';
 import {installSearchSelects} from './modules/search-select.js';
+import {bindCommittedSearch,isCompositionEvent,isSearchComposing} from './modules/search-input.js';
 import {mountMaintenance,maintenancePayload,bindMaintenanceActions} from './modules/contract-maintenance.js';
 import {installTablePanning} from './modules/table-pan.js';
 import {collectionDetail,contractWorkspace,contractHistoryList} from './modules/contract-workflow.js';
 import {mountCollectionForm,syncCollectionForm,showCollectionError,contractFile} from './modules/collection-controller.js';
+import {mountQuoteForm,quoteItemRow,syncQuoteTotal} from './modules/quotes.js';
 import { api, setCsrf, setSimulationIdentity } from "./api.js";
 import { sessionControl, bindIdentityPicker } from './modules/developer-session.js';
 import {bindIntakeUpload,restoreIntakeUpload,setIntakeBusy,clearIntakeUpload} from './modules/intake-upload.js';
 import {intakeGuideCard} from './modules/intake.js';
 import {syncTargetForm} from './modules/targets.js';
 import {manualChoices,manualChooser,manualCreateActions,manualFormRoles} from './modules/manual-entry.js';
-import {followupFilters,reportMonthForPage} from './modules/shared.js';
+import {followupFilters,reportMonthForPage,selectCustomers,customerSearchText} from './modules/shared.js';
+import {mountCustomerForm,refreshCustomerTransfer,customerEditPayload} from './modules/customer-controller.js';
+import {mountOpportunityForm,activityPlanPayload,opportunityEditPayload} from './modules/opportunity-controller.js';
+import {activityEventDetail,mountActivityForm} from './modules/activities.js';
+import {workbenchMetricDetail} from './modules/workbench.js';
+import {workbenchModel} from './modules/workbench-view-model.js';
+import {monthlyBoardDetail} from './modules/monthly-board.js';
+import {analyticsDetail} from './modules/management-analytics.js';
+import {assetDetail} from './modules/management-assets.js';
+import {funnelDetail} from './modules/management-funnel.js';
+import {personalDetail} from './modules/management-personal.js';
+import {managementMonth,managementRange} from './modules/management-finance.js';
+import {teamExportRows,teamMetricDetail} from './modules/team-management.js';
+import {syncPerformanceReviewPreview,performanceQuoteDetail,selectPerformanceRows} from './modules/incentives.js';
 import {createMinutesController} from './modules/minutes.js';
 import {companyProfileFeedback} from './modules/customers.js';
 import {salesPolicyFromForm} from './modules/commission-policy.js';
@@ -40,7 +55,6 @@ import {
   contractDetail,
   formContent,
   contractItemRow,
-  quoteItemRow,
   filtered,
   timeline,
 } from "./views.js";
@@ -79,6 +93,15 @@ const getP = () =>
     desc: false,
     tab: "members",
   });
+const managementMonthPages = ['team', 'personal'];
+const selectedStateMonth = () => managementMonthPages.includes(current) ? getP().managementMonth || '' : current === 'performance' ? reportMonth : '';
+const managementDrawers = {
+  'management-analytics-detail': ['analytics', analyticsDetail],
+  'management-asset-detail': ['assets', assetDetail],
+  'management-funnel-detail': ['funnel', funnelDetail],
+  'personal-detail': ['personal', personalDetail],
+  'team-metric': ['team', teamMetricDetail],
+};
 const toast = (msg, error = false) => {
   const el = document.querySelector("#toast");
   el.className = error ? "error visible" : "visible";
@@ -110,11 +133,13 @@ function render() {
   }
   content();
 }
-async function reload() {
+async function reload({background=false}={}) {
   const request=++stateRequest,page=current;
-  const query=new URLSearchParams();if(page==='performance'&&reportMonth)query.set('month',reportMonth);if(commissionPeriod)query.set('commissionPeriod',commissionPeriod);
+  const query=new URLSearchParams(),month=selectedStateMonth();
+  if(month)query.set('month',month);
+  if(commissionPeriod)query.set('commissionPeriod',commissionPeriod);
   const state=await api('/state'+(query.size?'?'+query:''));
-  if(request!==stateRequest||current!==page)return;
+  if(request!==stateRequest||current!==page||background&&isSearchComposing())return false;
   S=state;
   for(const [id,actorId] of profileRequests){
     if(S.actor.id!==actorId){profileRequests.delete(id);continue;}
@@ -125,6 +150,7 @@ async function reload() {
   }
   if(S.developer)setSimulationIdentity(S.actor.id);
   render();
+  return true;
 }
 let commissionRefreshing=false;
 const commissionDetailKey=detail=>{
@@ -140,7 +166,7 @@ async function refreshRealtimeCommissions(manual=false){
   const actor=S.actor.id,period=S.commission.period,scrollY=window.scrollY;
   const opened=new Map([...document.querySelectorAll('.commission-live details')].map(detail=>[commissionDetailKey(detail),detail.open]));
   try{
-    await reload();
+    if(!await reload({background:!manual}))return;
     if(current==='commissions'&&S.actor.id===actor&&S.commission.period===period){
       for(const detail of document.querySelectorAll('.commission-live details'))if(opened.has(commissionDetailKey(detail)))detail.open=opened.get(commissionDetailKey(detail));
       window.scrollTo(0,scrollY);
@@ -150,19 +176,39 @@ async function refreshRealtimeCommissions(manual=false){
   finally{commissionRefreshing=false;}
 }
 setInterval(()=>{void refreshRealtimeCommissions();},15000);
+let auditWorkspaceRefreshing=false;
+async function refreshAuditWorkspace(manual=false) {
+  if(auditWorkspaceRefreshing||!S||!['activities','performance'].includes(current)||document.hidden||dialog.open||panel)return;
+  if(!manual&&(document.activeElement?.matches('input,select,textarea')||document.querySelector('#content [aria-expanded="true"]')))return;
+  auditWorkspaceRefreshing=true;
+  const page=current,actor=S.actor.id,scroll=window.scrollY;
+  const key=detail=>`${detail.closest('[data-performance-user]')?.dataset.performanceUser||''}:${detail.dataset.detailKey||detail.dataset.activityId||detail.className}:${detail.closest('[data-activity-id]')?.dataset.activityId||''}`;
+  const opened=new Map([...document.querySelectorAll('#content details')].map(detail=>[key(detail),detail.open]));
+  try {
+    if(!await reload({background:!manual}))return;
+    if(current===page&&S.actor.id===actor){
+      for(const detail of document.querySelectorAll('#content details'))if(opened.has(key(detail)))detail.open=opened.get(key(detail));
+      window.scrollTo(0,scroll);
+    }
+    if(manual)toast('数据已更新');
+  }catch(error){if(manual)toast(error.message,true);}
+  finally{auditWorkspaceRefreshing=false;}
+}
+setInterval(()=>{void refreshAuditWorkspace();},30000);
 window.addEventListener('focus',()=>{void refreshRealtimeCommissions();});
+window.addEventListener('focus',()=>{void refreshAuditWorkspace();});
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)void refreshRealtimeCommissions();});
 let profilePolling=false,lastProfilePoll=0;
 setInterval(async()=>{
-  if(profilePolling||!S||document.hidden||!(current==='customers'||panel?.type==='customer')||dialog.querySelector('form'))return;
+  if(profilePolling||!S||document.hidden||!(current==='customers'||panel?.type==='customer')||dialog.querySelector('form')||isSearchComposing())return;
   const progress=S.company_profiles,counts=progress?.counts||{};
   const busy=profileRequests.size>0||Number(counts.pending||0)+Number(counts.running||0)>0;
   if(Date.now()-lastProfilePoll<(busy?5000:15000))return;
   lastProfilePoll=Date.now();profilePolling=true;
-  const opened=dialog.open&&panel?.type==='customer'?{...panel,scrollTop:dialog.scrollTop}:null;
+  const opened=dialog.open&&panel?.type==='customer'?{...panel,scrollTop:dialog.scrollTop,...customerSections()}:null;
   try{
-    await reload();
-    if(opened&&dialog.open&&panel?.type==='customer'&&panel.id===opened.id){openPanel('customer',opened.id);dialog.scrollTop=opened.scrollTop;}
+    const loaded=await reload({background:true});
+    if(loaded&&opened&&dialog.open&&panel?.type==='customer'&&panel.id===opened.id){openPanel('customer',opened.id,opened);dialog.scrollTop=opened.scrollTop;}
   }catch{/* Existing page and input state remain available after a failed poll. */}
   finally{profilePolling=false;}
 },5000);
@@ -174,7 +220,11 @@ function openHtml(html, drawer = false) {
   if (!dialog.open) dialog.showModal();
   dialog.scrollTop = 0;
 }
+function customerSections(){
+  return panel?.type==='customer'?{customerSections:Object.fromEntries([...dialog.querySelectorAll('[data-customer-section]')].map(el=>[el.dataset.customerSection,el.open]))}:{};
+}
 function openPanel(type, id, options={}) {
+  minutesController.leaveDetail();
   if(['contract','collection'].includes(type))options={...options,tab:options.tab||(type==='collection'?'payments':'overview')};
   panel = { type, id: Number(id),...options };
   formReturn = null;
@@ -185,10 +235,16 @@ function openPanel(type, id, options={}) {
     collection: collectionDetail,
   }[type](S, id,options);
   openHtml(html, true);
+  if(type==='customer'&&options.customerSections)for(const el of dialog.querySelectorAll('[data-customer-section]'))if(Object.hasOwn(options.customerSections,el.dataset.customerSection))el.open=options.customerSections[el.dataset.customerSection];
   if(Number.isFinite(options.scrollTop))dialog.scrollTop=options.scrollTop;
+  if(options.paymentId){
+    const receipt=dialog.querySelector(`[data-receipt-id="${Number(options.paymentId)}"]`);
+    receipt?.scrollIntoView({block:'center'});
+    receipt?.focus({preventScroll:true});
+  }
 }
 function openForm(type, id = "", quarter = "") {
-  formReturn = panel?{...panel,scrollTop:dialog.scrollTop}:null;
+  formReturn = panel?{...panel,scrollTop:dialog.scrollTop,...customerSections()}:null;
   openHtml(formContent(S, type, id, quarter), false);
   if(['contract-maintain','contract-items'].includes(type)){
     const form=dialog.querySelector('form'),record=S.contracts.find(c=>c.id===Number(id));
@@ -196,9 +252,13 @@ function openForm(type, id = "", quarter = "") {
   }
   if(type==='target'&&dialog.querySelector('form[data-form="target"]'))syncTargetForm(dialog.querySelector('form'),S);
   if(['payment','payment-maintain'].includes(type)){syncPaymentFields(dialog.querySelector('form'));syncPaymentContext(dialog.querySelector('form'));}
-  if(type==='quote')syncQuoteTotal(dialog.querySelector('form'));
-  if(type==='contact')syncContactMethods(dialog.querySelector('form'));
+  if(type==='quote')mountQuoteForm(dialog.querySelector('form'),S);
+  if(['contact','edit-contact'].includes(type))syncContactMethods(dialog.querySelector('form'));
+  mountCustomerForm(dialog.querySelector('form'),S,{api});
   if(type==='activity'&&dialog.querySelector('form'))dialog.querySelector('form').dataset.contextOpportunity=id||'';
+  mountOpportunityForm(dialog.querySelector('form'),S);
+  mountActivityForm(dialog.querySelector('form'),S);
+  syncPerformanceReviewPreview(dialog.querySelector('form'),S);
   mountCollectionForm(dialog.querySelector('form'),S);
   if(S.actor.role==='admin'&&['contract-maintain','contract-meta','contract-items','payment-maintain','payment-allocation','item-margin','contract-delete'].includes(type))dialog.querySelector('.form-error')?.insertAdjacentHTML('afterend','<div class="wide admin-repair-note">管理员数据修正：请填写处理原因；当前汇总和未确认试算会更新，已确认结算快照保留。</div>');
 }
@@ -208,16 +268,12 @@ function syncPaymentFields(form) {
 function syncPaymentContext(form){
   if(form)syncCollectionForm(form,S);
 }
-function syncQuoteTotal(form) {
-  if(!form)return;
-  const total=[...form.querySelectorAll('.quote-item-row')].reduce((sum,row)=>{
-    const quantity=Number(row.querySelector('[data-field="quantity"]').value||0),price=Math.round(Number(row.querySelector('[data-field="list_price"]').value||0)*100),discount=Number(row.querySelector('[data-field="discount_percent"]').value||0)/100;
-    return sum+Math.round(Math.round(price*quantity)*discount);
-  },0)/100;
-  form.querySelector('#quote-total').textContent=total.toLocaleString('zh-CN',{minimumFractionDigits:2,maximumFractionDigits:2});
-}
 function syncContactMethods(form) {
   if(!form)return;
+  if(form.dataset.form==='edit-contact'&&!['phone','wechat','dingtalk'].some(name=>form.elements[name].value.trim())){
+    const original=S.contacts.find(p=>p.id===Number(form.dataset.id));
+    if(original&&!['phone','wechat','dingtalk'].some(name=>String(original[name]||'').trim())){form.elements.phone.setCustomValidity('');return;}
+  }
   const provided=['phone','wechat','dingtalk'].some(name=>form.elements[name].value.trim());
   form.elements.phone.setCustomValidity(provided?'':'电话、微信、钉钉至少填写一项。');
 }
@@ -247,9 +303,9 @@ function navigate(view, filters = {}) {
   else render();
 }
 async function openCommissionIssue(el){
-  const salesId=Number(el.dataset.salesId),contractId=Number(el.dataset.id)||null;
-  const issue=commissionIssueRows(S,getP()).find(row=>Number(row.sales_id)===salesId&&row.period===el.dataset.period&&String(row.code||'')===String(el.dataset.issueCode||'')&&(!contractId||Number(row.contract_id)===contractId||row.contracts?.some(c=>Number(c.id)===contractId)));
+  const issue=commissionIssueRows(S,getP()).find(row=>row.key===el.dataset.taskKey);
   if(!issue){toast('该事项已更新，请刷新后查看',true);return;}
+  const salesId=Number(issue.sales_id),contractId=Number(issue.contract_id);
   if(S.actor.role==='pm'||S.actor.role!=='admin'&&(issue.responsibility==='admin'||salesId!==S.actor.id)){
     toast('这项信息需要管理员处理',true);return;
   }
@@ -273,7 +329,19 @@ async function openCommissionIssue(el){
   const contract=S.contracts.find(c=>c.id===(contractId||issue.contract_id));
   if(!contract||S.actor.role==='sales'&&contract.owner_id!==S.actor.id){toast('当前账号无法维护这份合同',true);return;}
   const tab=action==='payment-allocation'?'payments':'overview';
-  openPanel('contract',contract.id,{tab});
+  const receipt=issue.payment_id==null?null:contract.payments?.find(p=>p.id===Number(issue.payment_id)&&p.status==='已到账');
+  if(issue.payment_id!=null&&!receipt){toast('这笔到账流水已更新，请刷新提成后核对',true);return;}
+  openPanel('contract',contract.id,{tab,paymentId:receipt?.id});
+  if(receipt&&canManageContractData(S)&&!contract.read_only){
+    const code=issue.blocking_code||issue.code;
+    if(code==='receipt_date_missing'){
+      openForm('payment-maintain',receipt.id);
+      dialog.querySelector('[name="pay_date"]')?.focus();
+    }else if(code==='receipt_split_missing'){
+      openForm('payment-allocation',receipt.id);
+      dialog.querySelector('[name="product_amount"]')?.focus();
+    }
+  }
   if(action==='contract-items'&&canManageContractData(S))openForm('contract-items',contract.id);
 }
 async function showLogin(message = "") {
@@ -308,6 +376,85 @@ document.addEventListener("click", async (e) => {
     id = el.dataset.id;
   if (action === "noop") return;
   try {
+    const drawer = Object.hasOwn(managementDrawers, action) ? managementDrawers[action] : null;
+    if(drawer?.[0]===current){
+      const html=drawer[1](S,getP(),id);
+      if(html){panel=null;formReturn=null;openHtml(html,true);}
+      return;
+    }
+    if(action==='management-range'&&current==='analytics'){
+      if(!['this-month','last-month','this-quarter','custom'].includes(id))return;
+      const P=getP(),range=id==='custom'?managementRange(S,P):{from:'',to:''};
+      Object.assign(P,range,{managementPreset:id,analyticsFiltersOpen:true});
+      content();
+      document.querySelector('[data-action="management-range"][aria-pressed="true"]')?.focus();
+      return;
+    }
+    if(action==='monthly-board-detail'&&((current==='customers'&&id?.startsWith('customer-'))||(current==='opportunities'&&id?.startsWith('opportunity-')))){
+      const html=monthlyBoardDetail(S,getP(),id);
+      if(html){panel=null;formReturn=null;openHtml(html,true);}
+      return;
+    }
+    if(current==='workbench'){
+      const P=getP();
+      if(action==='workbench-metric'){
+        if(id==='tasks'){
+          P.workbenchTask='all';
+          P.workbenchAll=true;
+          content();
+          const tasks=document.querySelector('#workbench-tasks');
+          tasks.focus({preventScroll:true});
+          tasks.scrollIntoView({block:'start'});
+        }else{
+          const html=workbenchMetricDetail(S,P.owner,id);
+          if(html){panel=null;formReturn=null;openHtml(html,true);}
+        }
+        return;
+      }
+      if(action==='workbench-task-filter'){
+        P.workbenchTask=id;
+        P.workbenchAll=false;
+        content();
+        document.querySelector('[data-action="workbench-task-filter"][aria-pressed="true"]')?.focus({preventScroll:true});
+        return;
+      }
+      if(action==='workbench-task-expand'){
+        P.workbenchAll=!P.workbenchAll;
+        content();
+        if(P.workbenchAll)document.querySelector('[data-action="workbench-task-expand"]')?.focus({preventScroll:true});
+        else{
+          const tasks=document.querySelector('#workbench-tasks');
+          tasks.focus({preventScroll:true});
+          tasks.scrollIntoView({block:'start'});
+        }
+        return;
+      }
+      if(action==='workbench-active'){
+        const {owner}=workbenchModel(S,P.owner);
+        navigate('opportunities',{opportunityView:'work',risk:'active',owner,stage:'',q:'',customerLevel:'',saleType:'',from:'',to:''});
+        return;
+      }
+      if(action==='workbench-timeline'){
+        const {owner}=workbenchModel(S,P.owner);
+        navigate('activities',{activityOwner:owner,activityFrom:'',activityTo:'',activityCustomer:'',activityOpportunity:'',activitySource:'',activityType:'',activityQ:'',activityStatus:'active',activityPage:1,source:''});
+        return;
+      }
+    }
+    if(['activity-refresh','performance-refresh'].includes(action)){await refreshAuditWorkspace(true);return;}
+    if(action==='activity-reset'){
+      Object.assign(getP(),{activityFrom:'',activityTo:'',activityOwner:'',activityCustomer:'',activityOpportunity:'',activitySource:'',activityType:'',activityQ:'',activityStatus:'',activityPage:1,source:''});content();return;
+    }
+    if(action==='activity-page'){getP().activityPage=Number(id)||1;content();document.querySelector('.activity-workspace')?.scrollIntoView({block:'start'});return;}
+    if(action==='performance-status-filter'){getP().performanceStatus=id||'all';content();return;}
+    if(action==='performance-target'){openForm('target',id,el.dataset.quarter||'');return;}
+    if(['activity-event-detail','activity-legacy-detail'].includes(action)){
+      panel=null;formReturn=null;openHtml(activityEventDetail(S,Number(id),action==='activity-legacy-detail'),true);
+      const review=current==='performance'&&S.performance.find(p=>p.user_id===Number(el.dataset.userId));
+      if(review?.status==='confirmed')dialog.querySelector('.dialog-body')?.insertAdjacentHTML('afterbegin',`<p class="activity-lock-note">当前原始记录可能已更新；${esc(review.month)} 绩效评分以卡片保存的锁定快照为准。</p>`);
+      return;
+    }
+    if(['activity-event-edit','activity-event-void','activity-legacy-edit','activity-legacy-void'].includes(action)){panel=null;openForm(action,id);return;}
+    if(action==='performance-quote-detail'){panel=null;formReturn=null;openHtml(performanceQuoteDetail(S,Number(id),Number(el.dataset.userId)),true);return;}
     if(action.startsWith('minutes-')){await minutesController.click(action,id,el);return;}
     if (action === "demo-login") {
       el.disabled = true;
@@ -424,6 +571,16 @@ document.addEventListener("click", async (e) => {
       navigate(view);
       return;
     }
+    if(['edit-customer','edit-contact','customer-transfer','edit-opportunity','opportunity-stage'].includes(action)){openForm(action,id);return;}
+    if(action==='opportunity-view'){getP().opportunityView=id;getP().risk='';getP().sort='';if(id==='ledger')getP().owner='';content();return;}
+    if(action==='customer-transfer-refresh'){await refreshCustomerTransfer(el.closest('form'));return;}
+    if(action==='customer-scope'){getP().customerScope=id;getP().owner='';content();return;}
+    if(action==='customer-duplicate-open'){openPanel('customer',id);return;}
+    if(action==='copy-contact'){
+      const value=el.dataset.value||'';if(!value)return;
+      try{await navigator.clipboard.writeText(value);toast('联系方式已复制');}
+      catch{toast('无法自动复制，请选中联系方式手动复制。',true);}return;
+    }
     if(action==='ai-start'||action==='maintenance-attachments'||aiDataActions.has(action)) {
       const intent=action==='maintenance-attachments'?'edit-contract':el.dataset.intent||action;
       const names={'edit-customer':'客户','new-contact':'客户','edit-contact':'联系人','edit-opportunity':'商机','new-activity':'商机','new-quote':'商机',convert:'商机','new-payment':'合同','edit-contract':'合同','edit-item':'合同行项','receive-payment':'收款计划','edit-user-mapping':'成员','toggle-user':'成员','commission-pay':'提成','payment-checkpoint':'收款计划'};
@@ -464,10 +621,26 @@ document.addEventListener("click", async (e) => {
       openForm(forms[action], id, el.dataset.quarter||'');
       return;
     }
-    if(action==='person-board') {navigate('personal',{owner:id});return;}
+    if(action==='person-board') {
+      const month=managementMonth(S,{managementMonth:el.dataset.month});
+      navigate('personal',{owner:id,managementMonth:month,from:'',to:'',level:'',saleType:''});
+      return;
+    }
+    if(action==='personal-workbench'&&current==='personal'&&S.actor.role==='admin'){
+      navigate('workbench',{owner:id,workbenchTask:'all',workbenchAll:false});return;
+    }
+    if(action==='team-member-performance'&&['team','personal'].includes(current)){
+      reportMonth=managementMonth(S,{managementMonth:el.dataset.month});
+      navigate('performance',{performanceOwner:id,performanceQ:'',performanceStatus:'all'});return;
+    }
+    if(action==='team-member-commission'&&current==='team'){
+      commissionPeriod=managementMonth(S,{managementMonth:el.dataset.month});
+      navigate('commissions',{owner:id,commissionQ:'',commissionStatus:'',commissionHistoryPeriod:''});return;
+    }
     if(action==='export-team') {exportList('team');return;}
     if (action === "stage-filter") {
-      navigate("opportunities", { stage: id, risk: "", q: "", owner: "" });
+      const previous=getP(),fromDashboard=['analytics','funnel','personal','assets'].includes(current);
+      navigate("opportunities", {opportunityView:'work',stage:id,risk:['赢单','输单','搁置'].includes(id)?'all':'active',q:'',owner:fromDashboard?(previous.owner||(current==='personal'?String(S.actor.id):'')):previous.owner||'',customerLevel:fromDashboard?previous.level||'':previous.customerLevel||'',saleType:previous.saleType||'',from:previous.from||'',to:previous.to||''});
       return;
     }
     if (action === "due-filter") {
@@ -480,7 +653,9 @@ document.addEventListener("click", async (e) => {
       return;
     }
     if (action === "reset-filters") {
+      if(current==='analytics')getP().analyticsFiltersOpen=true;
       Object.assign(getP(), {
+        followupScope: false,
         q: "",
         owner: "",
         stage: "",
@@ -488,6 +663,7 @@ document.addEventListener("click", async (e) => {
         risk: "",
         sort: "",
         from:'',to:'',source:'',saleType:'',customerLevel:'',
+        managementPreset:'this-month',
         workflowFilter:'',
       });
       content();
@@ -654,30 +830,42 @@ document.addEventListener("submit", async (e) => {
       path = "/customers/" + id;
       method = "PATCH";
     }
+    if(type==='customer-transfer'){path='/customers/'+id;method='PATCH';}
     if (type === "contact") {
       path = "/contacts";
       body.customer_id = b.customer_id||id;
     }
     if (type === 'edit-contact') { path='/contacts/'+id; method='PATCH'; }
+    if(['edit-customer','edit-contact','customer-transfer'].includes(type)){
+      body=customerEditPayload(S,type,id,b);
+      if(!Object.keys(body).length){close();toast('没有需要保存的修改');return;}
+    }
     if (type === "opportunity") path = "/opportunities";
     if(type==='opportunity'&&(body.product_amount==null||String(body.product_amount).trim()===''))throw new Error('请填写cash金额（元）；无产品金额时请明确填写0');
-    if (type === "edit-opportunity") {
+    if (type === "edit-opportunity"||type==='opportunity-stage') {
       path = "/opportunities/" + id;
       method = "PATCH";
+      body=opportunityEditPayload(S,type,id,b);
+      if(!Object.keys(body).length){close();toast('没有需要保存的修改');return;}
       if(Object.hasOwn(body,'product_amount')&&(body.product_amount==null||String(body.product_amount).trim()==='')){
         const previous=S.opportunities.find(record=>record.id===id);
         if(previous?.product_amount==null)delete body.product_amount;
         else throw new Error('已有cash金额不能清空；无产品金额时请明确填写0');
       }
     }
-    if (type === "activity") path = "/activities";
+    if (type === "activity") {path = "/activities";body=activityPlanPayload(form,b);}
+    if(type==='activity-event-edit'){path='/activity-events/'+id;method='PATCH';}
+    if(type==='activity-event-void'){path='/activity-events/'+id+'/void';body={...b,confirmed:true};}
+    if(type==='activity-legacy-edit'){path='/activities/'+id;method='PATCH';}
+    if(type==='activity-legacy-void'){path='/activities/'+id+'/void';body={...b,confirmed:true};}
     if (type === "quote") {
       path = "/quotes";
-      body.opportunity_id = b.opportunity_id||id;
-      body.items=[...form.querySelectorAll('.quote-item-row')].map(row=>{
+      const file=await contractFile(form,'报价附件');
+      const items=[...form.querySelectorAll('.quote-item-row')].map(row=>{
         const item=Object.fromEntries([...row.querySelectorAll('[data-field]')].map(input=>[input.dataset.field,input.value]));
         item.discount_rate=Number(item.discount_percent)/100;delete item.discount_percent;return item;
       });
+      body={opportunity_id:b.opportunity_id||id,items,note:b.note,...(file?{file}:{})};
     }
     if (type === "contract" || type === "convert") {
       path = "/contracts";
@@ -777,7 +965,7 @@ document.addEventListener("submit", async (e) => {
     if(type==='sales-commission-policy') {path='/rules';method='PATCH';body={commission:{sales_policy:salesPolicyFromForm(S.rules.commission.sales_policy,b)}};}
     if(['payment','payment-plan-create','payment-plan','payment-void','payment-reconcile','payment-maintain','payment-allocation','collection-receive'].includes(type)){
       const parent=body.contract_id?S.contracts.find(c=>c.id===Number(body.contract_id)):S.contracts.find(c=>c.payments.some(p=>p.id===id));
-      if(parent)returnTo={type:formReturn?.type==='contract'?'contract':formReturn?.type==='collection'?'collection':current==='collections'?'collection':'contract',id:parent.id,tab:'payments',scrollTop:formReturn?.tab==='payments'?formReturn.scrollTop||0:0};
+      if(parent)returnTo={type:formReturn?.type==='contract'?'contract':formReturn?.type==='collection'?'collection':current==='collections'?'collection':'contract',id:parent.id,tab:'payments',scrollTop:formReturn?.tab==='payments'?formReturn.scrollTop||0:0,paymentId:formReturn?.paymentId};
     }
     if(['contract-maintain','contract-items','contract-meta','contract-delete','payment-maintain','payment-allocation','item-margin'].includes(type)&&canManageContractData(S)){body.data_correction=true;}
     if(type==='item-margin'){delete body.amount;delete body.margin_percent;}
@@ -798,9 +986,11 @@ document.addEventListener("submit", async (e) => {
       returnTo = { type: "contract", id: result.id };
     if(type==='contact')returnTo={type:'customer',id:Number(body.customer_id)};
     if(type==='quote'||type==='activity')returnTo={type:'opportunity',id:Number(body.opportunity_id)};
+    if(type==='activity'&&current==='activities')returnTo=null;
     if(type==='archive-contract')returnTo={type:'contract',id:Number(id),tab:'payments',scrollTop:0};
     if(['contracts','collections'].includes(current)&&current===submittedPage.view){window.scrollTo(0,submittedScroll.top);const table=document.querySelector('.workflow-ledger-table');if(table)table.parentElement.scrollLeft=submittedScroll.left;}
     if (returnTo&&showSavedDetail&&current===submittedPage.view&&!dialog.open) openPanel(returnTo.type, returnTo.id,returnTo);
+    if(['activity-event-edit','activity-event-void','activity-legacy-edit','activity-legacy-void'].includes(type)&&showSavedDetail&&current===submittedPage.view&&!dialog.open)openHtml(activityEventDetail(S,result.id),true);
     if(type==='admin-record'&&form.querySelector('.recycle-preview-context'))await showRecycle(recycleFilters);
     toast(result.message || "已保存");
   } catch (err) {
@@ -837,22 +1027,56 @@ async function switchIdentity(id) {
 
 document.addEventListener("change", async (e) => {
   if (!S) return;
+  if(current==='analytics'&&e.target.closest('.analytics-filters'))getP().analyticsFiltersOpen=true;
+  if(e.target.id==='management-month'&&managementMonthPages.includes(current)){
+    const P=getP(),previous=P.managementMonth;
+    P.managementMonth=managementMonth(S,{managementMonth:e.target.value});
+    try {await reload();}catch(error){
+      P.managementMonth=previous;
+      if(current===P.view)content();
+      toast(error.message,true);
+    }
+    return;
+  }
+  if(current==='analytics'&&['filter-from','filter-to'].includes(e.target.id)){
+    Object.assign(getP(),{
+      from:document.querySelector('#filter-from').value,
+      to:document.querySelector('#filter-to').value,
+      managementPreset:'custom',
+    });
+    content();return;
+  }
+  if(current==='team'&&['team-risk-stage','team-risk-level'].includes(e.target.id)){
+    getP()[e.target.id==='team-risk-stage'?'teamRiskStage':'teamRiskLevel']=e.target.value;
+    content();return;
+  }
+  if(current==='workbench'&&e.target.id==='workbench-owner'){
+    Object.assign(getP(),{owner:e.target.value,workbenchTask:'all',workbenchAll:false});
+    content();
+    return;
+  }
+  const auditFilters={'activity-from':'activityFrom','activity-to':'activityTo','activity-owner':'activityOwner','activity-customer':'activityCustomer','activity-opportunity':'activityOpportunity','activity-source':'activitySource','activity-type':'activityType','activity-status':'activityStatus','performance-status':'performanceStatus','performance-owner':'performanceOwner'};
+  if(auditFilters[e.target.id]){
+    getP()[auditFilters[e.target.id]]=e.target.value;
+    if(e.target.id.startsWith('activity-')){getP().activityPage=1;if(e.target.id==='activity-source')getP().source='';if(e.target.id==='activity-customer')getP().activityOpportunity='';}
+    content();return;
+  }
   if(current==='intake'&&e.target.id==='ai-guide-table') {
     getP().guideTable=e.target.value;
     const fields=document.querySelector('#ai-guide-fields');
     if(fields)fields.innerHTML=intakeGuideCard(S,e.target.value);
     return;
   }
-  if(e.target.matches('form[data-form="activity"] [name="opportunity_id"]')) {
-    const form=e.target.form,previous=S.opportunities.find(o=>o.id===Number(form.dataset.contextOpportunity)),next=S.opportunities.find(o=>o.id===Number(e.target.value));
-    if(form.elements.action.value===(previous?.next_action||''))form.elements.action.value=next?.next_action||'';
-    if(form.elements.follow_date.value===(previous?.follow_date||S.today))form.elements.follow_date.value=next?.follow_date||S.today;
-    form.dataset.contextOpportunity=e.target.value;
-  }
+  if(e.target.id==='opportunity-sort'){getP().opportunitySort=e.target.value;content();return;}
   if(e.target.matches('form[data-form="payment"] [name="status"],form[data-form="payment-maintain"] [name="status"],form[data-form="payment-maintain"] [name="amount"]'))syncPaymentFields(e.target.form);
   if(e.target.matches('form[data-form="payment"] [name="contract_id"]'))syncPaymentContext(e.target.form);
   if(e.target.matches('form[data-form="target"] [name="user_id"],form[data-form="target"] [name="quarter"]'))syncTargetForm(e.target.form,S);
-  if(e.target.id==='target-quarter'){getP().targetQuarter=e.target.value;content();return;}
+  if(e.target.id==='target-quarter'){
+    const P=getP();
+    P.targetQuarter=e.target.value;
+    if(current==='team')P.teamTargetsOpen=true;
+    content();return;
+  }
   if(['commission-status','commission-history-period'].includes(e.target.id)){
     getP()[e.target.id==='commission-status'?'commissionStatus':'commissionHistoryPeriod']=e.target.value;content();return;
   }
@@ -877,44 +1101,53 @@ document.addEventListener("change", async (e) => {
     try {await reload();}catch(error){toast(error.message,true);}
   }
 });
+document.addEventListener('toggle',event=>{
+  if(current==='team'&&event.target.matches?.('.team-targets'))getP().teamTargetsOpen=event.target.open;
+  if(current==='analytics'&&event.target.matches?.('.analytics-filters'))getP().analyticsFiltersOpen=event.target.open;
+},true);
+const searchFields={
+  'list-search':'q',
+  'activity-search':'activityQ',
+  'performance-search':'performanceQ',
+  'commission-search':'commissionQ',
+};
+bindCommittedSearch(document,Object.keys(searchFields).map(id=>`#${id}`).join(','),input=>{
+  if(!S)return;
+  clearTimeout(searchTimer);
+  const page=getP(),key=searchFields[input.id];
+  page[key]=input.value;
+  if(key==='activityQ')page.activityPage=1;
+  function refresh(){
+    if(current!==page.view||!input.isConnected)return;
+    if(isSearchComposing()){
+      searchTimer=setTimeout(refresh,180);
+      return;
+    }
+    const focused=document.activeElement===input;
+    const {selectionStart,selectionEnd,selectionDirection}=input;
+    content();
+    const replacement=document.getElementById(input.id);
+    if(focused&&replacement){
+      replacement.focus({preventScroll:true});
+      replacement.setSelectionRange(selectionStart,selectionEnd,selectionDirection);
+    }
+  }
+  searchTimer=setTimeout(refresh,180);
+},()=>clearTimeout(searchTimer));
 document.addEventListener("input", (e) => {
   if (!S) return;
-  if(e.target.id==='commission-search'){
-    clearTimeout(searchTimer);
-    if(e.isComposing)return;
-    const page=getP(),value=e.target.value,position=e.target.selectionStart;
-    searchTimer=setTimeout(()=>{
-      if(current!==page.view)return;
-      page.commissionQ=value;content();
-      const input=document.querySelector('#commission-search');
-      if(input){input.focus();input.setSelectionRange(position,position);}
-    },180);return;
-  }
   if(e.target.matches('form[data-form="performance-rules"] [name="performance:process_weight"],form[data-form="performance-rules"] [name="performance:result_weight"]')){
     const value=Number(e.target.value),other=e.target.name==='performance:process_weight'?'performance:result_weight':'performance:process_weight';
     if(e.target.value!==''&&Number.isFinite(value)&&value>=0&&value<=100)e.target.form.elements.namedItem(other).value=String(Math.round((100-value)*100)/100);
   }
-  if(e.target.closest('.quote-item-row'))syncQuoteTotal(e.target.form);
-  if(e.target.matches('form[data-form="contact"] [name="phone"],form[data-form="contact"] [name="wechat"],form[data-form="contact"] [name="dingtalk"]'))syncContactMethods(e.target.form);
+  if(e.target.matches('form[data-form="contact"] [name="phone"],form[data-form="contact"] [name="wechat"],form[data-form="contact"] [name="dingtalk"],form[data-form="edit-contact"] [name="phone"],form[data-form="edit-contact"] [name="wechat"],form[data-form="edit-contact"] [name="dingtalk"]'))syncContactMethods(e.target.form);
   if(e.target.matches('form[data-form="performance-review"] [name="adjustment"],form[data-form="performance-review"] [name="final_score"]')) {
-    e.target.form.elements.reason.required=e.target.form.elements.adjustment.value!==''||e.target.form.elements.final_score.value!=='';
+    syncPerformanceReviewPreview(e.target.form,S);
   }
-  if (e.target.id === "list-search") {
-    clearTimeout(searchTimer);
-    const value = e.target.value;
-    const page=getP();
-    searchTimer = setTimeout(() => {
-      if(current!==page.view)return;
-      page.q = value;
-      content();
-      const input = document.querySelector("#list-search");
-      if(!input)return;
-      input.focus();
-      input.setSelectionRange(value.length, value.length);
-    }, 180);
-  }
-  if (e.target.id === "global-search") {
-    const q = e.target.value.trim().toLowerCase();
+});
+bindCommittedSearch(document,'#global-search',input=>{
+    if(!S)return;
+    const q = input.value.trim().toLowerCase();
     const area = document.querySelector("#search-results");
     if (!q) {
       area.hidden = true;
@@ -927,6 +1160,7 @@ document.addEventListener("input", (e) => {
         id: c.id,
         name: c.name,
         meta: c.industry,
+        search:customerSearchText(S,c),
       })),
       ...S.opportunities.map((o) => ({
         type: "opportunity",
@@ -943,7 +1177,7 @@ document.addEventListener("input", (e) => {
         meta: c.code,
       })),
     ]
-      .filter((r) => (r.name + r.meta).toLowerCase().includes(q))
+      .filter((r) => (r.search||(r.name + r.meta).toLowerCase()).includes(q.normalize('NFKC')))
       .slice(0, 9);
     area.hidden = false;
     area.innerHTML = records.length
@@ -954,7 +1188,6 @@ document.addEventListener("input", (e) => {
           )
           .join("")
       : '<p class="search-empty">没有找到匹配记录</p>';
-  }
 });
 document.addEventListener("click", (e) => {
   const picker=document.querySelector('#developer-picker');
@@ -965,6 +1198,7 @@ document.addEventListener("click", (e) => {
   }
 });
 document.addEventListener("keydown", (e) => {
+  if(isCompositionEvent(e))return;
   if (
     e.key === "/" &&
     !["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement.tagName) &&
@@ -980,6 +1214,7 @@ document.addEventListener("keydown", (e) => {
 });
 dialog.addEventListener("cancel", (e) => {
   e.preventDefault();
+  if(isSearchComposing())return;
   close();
 });
 dialog.addEventListener("click", (e) => {
@@ -1003,7 +1238,9 @@ window.addEventListener("hashchange", async () => {
     if (dialog.open) dialog.close();
     panel = null;
     formReturn = null;
-    if(S.period!==reportMonthForPage(current,reportMonth,S.today)) {
+    const expectedMonth=selectedStateMonth()||reportMonthForPage(current,reportMonth,S.today);
+    const commissionChanged=current==='commissions'&&commissionPeriod&&S.commission.period!==commissionPeriod;
+    if(current==='performance'||current==='activities'||S.period!==expectedMonth||commissionChanged) {
       document.querySelector('#content').innerHTML='<div class="empty" role="status">正在读取当前页面数据…</div>';
       try {await reload();} catch(error) {toast(error.message,true);}
     } else render();
@@ -1017,15 +1254,16 @@ function exportList(typeOverride,commissionSection='summary') {
   let rows;
   if (type === "customers")
     rows = [
-      ["客户名称", "简称", "行业", "地区", "手动等级", "负责人", "状态"],
-      ...filtered(S, P, S.customers).map((c) => [
+      ["客户名称", "简称", "行业", "地区", "客户等级", "负责人", "合作情况", "管理状态"],
+      ...selectCustomers(S, P).map((c) => [
         c.name,
         c.short_name,
         c.industry,
         c.region,
         c.manual_level || '',
         S.users.find((u) => u.id === c.owner_id)?.name,
-        c.status,
+        c.relationship_status||'待核对',
+        c.management_status||(['冻结','流失'].includes(c.status)?c.status:'正常'),
       ]),
     ];
   else if (type === "contracts")
@@ -1047,8 +1285,8 @@ function exportList(typeOverride,commissionSection='summary') {
         c.sign_date,
       ]),
     ];
-  else if(type==='team')rows=[['销售','本月新签(元)','本月回款(元)','漏斗金额(元)','风险商机','近7天跟进','绩效分','等级'],...S.team.filter(u=>!P.owner||u.id===Number(P.owner)).map(u=>[u.name,u.signed/100,u.collected/100,u.pipeline/100,u.riskCount,u.followCount,u.performance?.total??'',u.performance?.grade??''])];
-  else if(type==='performance')rows=[['销售','月份','过程原始分','过程折算分','合同结果分','总分','等级','绩效工资系数','状态'],...S.performance.filter(p=>!P.owner||p.user_id===Number(P.owner)).map(p=>[p.name,p.month,p.raw,p.processPoints,p.resultPoints,p.total,p.grade,p.salary_factor,p.status])];
+  else if(type==='team')rows=teamExportRows(S,P);
+  else if(type==='performance')rows=[['销售','月份','系统过程分','计入过程分','过程折算分','合同结果分','系统总分','人工最终分','最终总分','等级','绩效工资系数','状态','调整原因'],...selectPerformanceRows(S,P).map(p=>[p.name,p.month,p.automatic_raw??p.process.raw,p.raw,p.processPoints,p.resultPoints,p.system_total??p.automatic_total,p.final_score,p.total,p.grade,p.salary_factor,p.status,p.reason])];
   else if(type==='commissions') {
     const exports=buildCommissionExport(S,P);
     rows=commissionSection==='detail'?exports.detailRows:commissionSection==='issues'?exports.issueRows:exports.summaryRows;

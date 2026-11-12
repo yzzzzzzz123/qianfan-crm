@@ -1,6 +1,6 @@
 import {expenseDetailCounts} from './contract-expenses.mjs';
 import { all, one } from '../database.mjs';
-import { code, risk, period, quarter, today, STAGES } from '../domain.mjs';
+import { code, risk, period, quarter, today, now, STAGES } from '../domain.mjs';
 import { publicUser } from './auth.mjs';
 import { commissionPreview, performanceFor, managerId,contractLocks } from './incentives.mjs';
 import {ledgerPayments} from '../collection-ledger.mjs';
@@ -10,6 +10,11 @@ import {businessTableCatalog} from './intake-fields.mjs';
 import {deriveQuoteTotals} from '../quote-values.mjs';
 import {contractFinancials,effectiveContractFinancials} from '../contract-financials.mjs';
 import {qfcrmSourceFields,contractSourceFields,importedCollections} from '../qfcrm-source-fields.mjs';
+import {performanceInputs} from '../performance-inputs.mjs';
+import {processLedger} from '../performance-ledger.mjs';
+import {canCorrectActivityEvent,activityLegacyVersion} from './activity-corrections.mjs';
+import {minutesActivityStatus,minutesSummarySources} from './minutes/followup.mjs';
+import {signedOpportunitySummary,opportunityForecast,currentQuoteIds,quoteVersion,opportunityDiagnostics,addSignedDiagnostics} from './opportunity-summary.mjs';
 const sum=(a,fn)=>a.reduce((s,x)=>s+fn(x),0);
 const elapsed=(d)=>d?Math.max(0,Math.floor((new Date(today())-new Date(d.slice(0,10)))/86400000)):0;
 export {contractFinancials} from '../contract-financials.mjs';
@@ -55,7 +60,7 @@ function importHistory(db,actor,records) {
 }
 export function buildState(context,actor) {
   const {db,getRules,demo,ding={},ai={}}=context,rules=getRules(),isAdmin=actor.role==='admin',isPm=actor.role==='pm';
-  const month=context.month||period();
+  const month=context.month||period(),scoringInputs=performanceInputs(db);
   const importedSources=qfcrmSourceFields(db);
   const maintainedFields=new Map();
   for(const row of all(db,"SELECT entity_id,detail FROM audit WHERE entity='contract' AND action='更新合同' AND json_valid(detail)")){
@@ -76,37 +81,114 @@ export function buildState(context,actor) {
   const rawOpps=all(db,'SELECT * FROM opportunities WHERE archived_at IS NULL ORDER BY updated_at DESC');
   const visibleOpps=rawOpps.filter(o=>isAdmin || (isPm ? o.collaborator_pm===actor.id||linkedCustomers.has(o.customer_id) : o.owner_id===actor.id));
   const oppIds=new Set(visibleOpps.map(o=>o.id));
-  const allActivities=all(db,'SELECT * FROM activities ORDER BY activity_date DESC,id DESC');
+  const summarySources=minutesSummarySources(db);
+  const storedActivities=all(db,'SELECT * FROM activities ORDER BY activity_date DESC,id DESC').map(a=>a.minutes_record_id?{...a,...minutesActivityStatus(a,summarySources.get(a.minutes_record_id))}:a);
   const events=all(db,'SELECT * FROM activity_events ORDER BY activity_date DESC,id DESC');
+  const activeParents=new Set(events.filter(e=>!e.voided_at).map(e=>e.activity_id));
+  const allActivities=storedActivities.filter(a=>!a.event_managed||activeParents.has(a.id));
+  // A failed summary read does not undo a recording that already happened.
+  // Only withdrawn projections cease to establish a business contact date.
+  const effectiveActivities=allActivities.filter(a=>a.source_withdrawn!==true);
   const contactsRaw=all(db,'SELECT * FROM contacts');
   const rawQuotes=all(db,'SELECT * FROM quotes ORDER BY id DESC');
+  const currentQuotes=currentQuoteIds(rawQuotes),quotesById=new Map(rawQuotes.map(q=>[q.id,q]));
   const opportunities=visibleOpps.map(o=>{
-    const activity=allActivities.find(a=>a.opportunity_id===o.id&&a.activity_type!=='系统');
+    const activity=effectiveActivities.find(a=>a.opportunity_id===o.id&&a.activity_type!=='系统');
     const status=risk(o,rules);
     const inactive=elapsed(activity?.activity_date||o.created_at);
     const contacts=contactsRaw.filter(p=>p.customer_id===o.customer_id&&!p.archived_at);
-    const expired=rawQuotes.some(q=>q.opportunity_id===o.id&&q.valid_until<today());
-    if(!['赢单','输单','搁置'].includes(o.stage)) {
-      if(inactive>=rules.inactivity_days) Object.assign(status,{level:'critical',label:'长期未互动'});
-      else if(status.level==='normal'&&status.days>=status.threshold*rules.attention_ratio)Object.assign(status,{level:'attention',label:'接近停滞阈值'});
-      if(expired&&status.level==='normal')Object.assign(status,{level:'attention',label:'报价已过期'});
-    }
+    const currentQuote=quotesById.get(currentQuotes.get(o.id));
     const keyStale=contacts.some(p=>['决策人','影响者'].includes(p.role)&&p.last_contact&&elapsed(p.last_contact)>=rules.contact_days);
-    if(!['赢单','输单','搁置'].includes(o.stage)&&keyStale&&status.level==='normal')Object.assign(status,{level:'attention',label:'关键人待触达'});
-    const result={...o,code:o.reference||(importedSources.opportunities.get(o.id)?.source_reference_missing?'编号待补充':code('SJ',o.id,o.created_at)),risk:status,last_interaction:activity?.activity_date||null,inactive_days:inactive,aiAnalysis:{kind:'rules',nextActions:[rules.sop[o.stage],o.next_action].filter(Boolean),risks:[status.level!=='normal'?status.label:null,expired?'存在过期报价':null,keyStale?'关键联系人长期未触达':null].filter(Boolean),pricingTrigger:o.stage==='方案'&&!!activity,keyPersonInsights:contacts.some(p=>p.role==='决策人')?'已登记决策人，请核对近期触达情况':'尚未登记决策人，建议补齐决策链'}};
+    const management=opportunityDiagnostics(o,status,{asOf:today(),rules,inactive,currentQuote,keyContactStale:keyStale});
+    const result={...o,...opportunityForecast({...o,...(isPm?{initial_amount:undefined}:{})}),...management,current_quote_id:isPm?null:currentQuote?.id||null,code:o.reference||(importedSources.opportunities.get(o.id)?.source_reference_missing?'编号待补充':code('SJ',o.id,o.created_at)),last_interaction:activity?.activity_date||null,inactive_days:inactive,aiAnalysis:{kind:'rules',nextActions:[rules.sop[o.stage],o.next_action].filter(Boolean),risks:[...management.risk_reasons],pricingTrigger:o.stage==='方案'&&!!activity,keyPersonInsights:contacts.some(p=>p.role==='决策人')?'已登记决策人，请核对近期触达情况':'尚未登记决策人，建议补齐决策链'}};
     if(isPm) {delete result.initial_amount;}
     return {...result,...(!o.owner_id&&importedSources.opportunities.has(o.id)?{owner_label:importedSources.opportunities.get(o.id).sales_names.join('、')}:{}),sources:sources('opportunity',o.id),can_read_sources:true};
   });
   const pmCustomers=new Set(visibleOpps.map(o=>o.customer_id));
+  const cooperatingCustomers=new Set(all(db,"SELECT DISTINCT customer_id FROM contracts WHERE retired_at IS NULL AND terminated_at IS NULL AND lifecycle!='草稿'").map(c=>c.customer_id));
   const customers=all(db,'SELECT * FROM customers ORDER BY id DESC').filter(c=>!isPm||pmCustomers.has(c.id)||linkedCustomers.has(c.id)).map(c=>{
     const full=isAdmin||isPm||c.owner_id===actor.id;
     const base=full?c:{id:c.id,name:c.name,short_name:c.short_name,industry:c.industry,region:c.region,manual_level:c.manual_level,owner_id:c.owner_id,status:c.status,parent_company:c.parent_company,group_name:c.group_name,shared:true};
-    return {...base,sources:full?sources('customer',c.id):[],can_read_sources:isAdmin||actor.role==='sales'&&c.owner_id===actor.id,collaborators:full?collaborators.filter(x=>x.customer_id===c.id).map(x=>x.user_id):[],last_interaction:allActivities.find(a=>oppIds.has(a.opportunity_id)&&rawOpps.some(o=>o.id===a.opportunity_id&&o.customer_id===c.id))?.activity_date||null};
+    return {...base,management_status:['冻结','流失'].includes(c.status)?c.status:'正常',relationship_status:cooperatingCustomers.has(c.id)?'已合作':'未合作',sources:full?sources('customer',c.id):[],can_read_sources:isAdmin||actor.role==='sales'&&c.owner_id===actor.id,collaborators:full?collaborators.filter(x=>x.customer_id===c.id).map(x=>x.user_id):[],last_interaction:effectiveActivities.find(a=>!['系统','系统里程碑'].includes(a.activity_type)&&oppIds.has(a.opportunity_id)&&rawOpps.some(o=>o.id===a.opportunity_id&&o.customer_id===c.id))?.activity_date||null};
   });
   const customerIds=new Set(customers.filter(c=>!c.shared).map(c=>c.id));
   const ownMinutes=new Set(isAdmin||isPm?[]:all(db,'SELECT r.id FROM minutes_records r JOIN minutes_sources s ON s.id=r.source_id WHERE s.member_id=?',actor.id).map(r=>r.id));
-  const activities=allActivities.filter(a=>oppIds.has(a.opportunity_id)&&(!a.minutes_record_id||isAdmin||!isPm&&ownMinutes.has(a.minutes_record_id))).map(a=>({...a,sources:[...new Set(events.filter(e=>e.activity_id===a.id).map(e=>e.source))].concat(events.some(e=>e.activity_id===a.id)?[]:[a.source])}));
-  const quotes=isPm?[]:rawQuotes.filter(q=>oppIds.has(q.opportunity_id)).map(q=>({...q,...deriveQuoteTotals(q.items),items:JSON.parse(q.items||'[]'),code:code('BJ',q.id,q.created_at)}));
+  const activityParents=new Map(storedActivities.map(a=>[a.id,a]));
+  const mayReadMinutes=a=>!a?.minutes_record_id||isAdmin||!isPm&&ownMinutes.has(a.minutes_record_id);
+  const visibleEvents=events.filter(e=>{
+    const parent=activityParents.get(e.activity_id);
+    return mayReadMinutes(parent)&&(isAdmin||oppIds.has(e.opportunity_id)||!isPm&&(e.user_id===actor.id||e.credited_user_id===actor.id));
+  });
+  const activeEventParents=new Set(events.filter(e=>!e.voided_at).map(e=>e.activity_id));
+  const activities=allActivities.filter(a=>oppIds.has(a.opportunity_id)&&mayReadMinutes(a)&&(!a.event_managed||activeEventParents.has(a.id))).map(a=>({...a,sources:[...new Set(visibleEvents.filter(e=>e.activity_id===a.id&&!e.voided_at).map(e=>e.source))].concat(events.some(e=>e.activity_id===a.id)?[]:[a.source])}));
+  const historicGroups=new Map(),scoringOpps=new Map(scoringInputs.opportunities.map(o=>[o.id,o]));
+  for(const event of visibleEvents)if(!oppIds.has(event.opportunity_id)&&!event.voided_at){
+    if(!historicGroups.has(event.activity_id))historicGroups.set(event.activity_id,[]);
+    historicGroups.get(event.activity_id).push(event);
+  }
+  // A former owner can read their own contributions, not the new owner's later notes.
+  for(const [id,rows] of historicGroups){
+    const parent=activityParents.get(id),o=scoringOpps.get(rows[0].opportunity_id);
+    if(parent)activities.push({...parent,historical_only:true,opportunity_name:o?.name||'历史商机',customer_name:o?.customer_name||'',opportunity_archived:!!o?.archived_at,summary:rows.map(e=>e.summary).join('\n'),action:rows.map(e=>e.action||'').filter(Boolean).join('\n'),sources:[...new Set(rows.map(e=>e.source))]});
+  }
+  for(const a of allActivities)if(!oppIds.has(a.opportunity_id)&&!a.event_managed&&!events.some(e=>e.activity_id===a.id)&&mayReadMinutes(a)&&(isAdmin||!isPm&&a.user_id===actor.id)){
+    const o=scoringOpps.get(a.opportunity_id);
+    activities.push({...a,historical_only:true,opportunity_name:o?.name||'历史商机',customer_name:o?.customer_name||'',opportunity_archived:!!o?.archived_at,sources:[a.source]});
+  }
+  activities.sort((a,b)=>b.activity_date.localeCompare(a.activity_date)||b.id-a.id);
+  const frozenActivity=(snapshot,event,legacy=false)=>{
+    if(!snapshot)return undefined;
+    if(Array.isArray(snapshot.score_ledger))return snapshot.score_ledger.find(row=>row.kind==='activity'&&(legacy?!row.event_id&&row.activity_id===event.id:row.event_id===event.id));
+    for(const [key,type] of [['meetings','线上会议'],['visits','现场拜访'],['quotes','对客报价']]){
+      const row=(snapshot.evidence?.[key]||[]).find(row=>row.activity_type===type&&row.opportunity_id===event.opportunity_id&&row.activity_date===event.activity_date&&(legacy?!row.activity_id&&row.id===event.id:!!row.activity_id&&(row.event_id??row.id)===event.id));
+      if(row)return {...row,snapshot_category:key};
+    }
+  };
+  const snapshotActivityScore=(snapshot,row,month)=>{
+    if(!row)return {counted:false,points:0,reason:'该月绩效已锁定，本记录未纳入锁定评分',month,locked:true};
+    if(Object.hasOwn(row,'counted'))return {counted:row.counted,points:row.points??null,reason:row.counted?'已纳入锁定绩效，后续纠错不改变原快照':row.reason||'锁定时未计分',month,locked:true};
+    const key={meetings:'meeting',visits:'visit'}[row.snapshot_category];
+    // Old quote evidence can include same-day duplicates; its presence alone
+    // does not prove that this particular entry contributed a point.
+    const known=!!key&&snapshot.process?.[key]===snapshot.evidence?.[row.snapshot_category]?.length;
+    return {counted:known?true:null,points:known?snapshot.calculation_rules?.[key]??null:null,reason:known?'已纳入锁定绩效，后续纠错不改变原快照':'已纳入历史依据，单条分值未保存',month,locked:true};
+  };
+  const lockedReviews=all(db,"SELECT user_id,month,snapshot FROM performance_reviews WHERE status='confirmed'");
+  const lockMap=new Map(lockedReviews.map(r=>[`${r.user_id}:${r.month}`,JSON.parse(r.snapshot)])),eventScores=new Map(),legacyScores=new Map(),scoredGroups=new Set();
+  const scoreGroup=(userId,month)=>{
+    const key=`${userId}:${month}`;
+    if(scoredGroups.has(key))return;
+    scoredGroups.add(key);
+    const scored=processLedger(scoringInputs.opportunities,scoringInputs.activities,scoringInputs.quotes,userId,month,rules.performance);
+    for(const row of scored.score_ledger)if(row.event_id)eventScores.set(row.event_id,row);else if(row.kind==='activity')legacyScores.set(row.activity_id,row);
+  };
+  for(const event of visibleEvents)scoreGroup(event.credited_user_id,event.activity_date.slice(0,7));
+  const trackedActivityIds=new Set(events.map(e=>e.activity_id));
+  for(const a of activities)if(!a.event_managed&&!trackedActivityIds.has(a.id)){
+    const credited=a.user_id??scoringOpps.get(a.opportunity_id)?.owner_id,month=a.activity_date.slice(0,7);
+    scoreGroup(credited,month);
+    const score=legacyScores.get(a.id),snapshot=lockMap.get(`${credited}:${month}`),locked=!!snapshot;
+    const frozen=frozenActivity(snapshot,a,true);
+    a.credited_user_id=credited;
+    a.legacy_version=activityLegacyVersion(a);
+    const canCorrect=canCorrectActivityEvent(actor,{...a,credited_user_id:credited},a);
+    a.can_edit=canCorrect;a.can_void=canCorrect;
+    a.score=locked?snapshotActivityScore(snapshot,frozen,month):{counted:!!score?.counted,points:score?.points??0,reason:score?.reason||'该行为类型不计入过程分',month,locked:false};
+  }
+  const activityEvents=visibleEvents.map(e=>{
+    const o=scoringOpps.get(e.opportunity_id),score=eventScores.get(e.id),month=e.activity_date.slice(0,7),snapshot=lockMap.get(`${e.credited_user_id}:${month}`),locked=!!snapshot;
+    const frozen=frozenActivity(snapshot,e);
+    const canCorrect=canCorrectActivityEvent(actor,e,activityParents.get(e.activity_id));
+    return {...e,opportunity_name:o?.name||'历史商机',customer_name:o?.customer_name||'',opportunity_archived:!!o?.archived_at,can_edit:canCorrect&&!e.voided_at,can_void:canCorrect&&!e.voided_at,score:locked?snapshotActivityScore(snapshot,frozen,month):{counted:!!score?.counted,points:score?.points??0,reason:score?.reason||'该行为类型不计入过程分',month,locked:false}};
+  });
+  const lockUsers=new Set([actor.id,...visibleOpps.map(o=>o.owner_id),...visibleEvents.map(e=>e.credited_user_id)]);
+  const performanceLocks=lockedReviews.filter(r=>isAdmin||lockUsers.has(r.user_id)).map(({user_id,month})=>({user_id,month}));
+
+  const quotes=isPm?[]:rawQuotes.filter(q=>oppIds.has(q.opportunity_id)).map(q=>({
+    ...q,...quoteVersion(q,currentQuotes.get(q.opportunity_id),today()),...deriveQuoteTotals(q.items),
+    items:JSON.parse(q.items||'[]'),code:code('BJ',q.id,q.created_at),
+    attachments:all(db,"SELECT id,filename,mime_type,size,created_at,created_by FROM attachments WHERE entity='quote' AND entity_id=? ORDER BY id",q.id),
+  }));
   const contracts=all(db,'SELECT c.*,customer.name AS customer_name FROM contracts c JOIN customers customer ON customer.id=c.customer_id WHERE c.retired_at IS NULL ORDER BY c.id DESC').filter(c=>isAdmin||(isPm?c.collaborator_pm===actor.id||linkedCustomers.has(c.customer_id):c.owner_id===actor.id)).map(c=>{
     const payments=ledgerPayments(db,c.id);
     const collected=sum(payments.filter(p=>p.status==='已到账'),p=>p.amount);
@@ -126,11 +208,15 @@ export function buildState(context,actor) {
       planned_remaining:planned,unplanned_amount:Math.max(0,c.amount-collected-planned),needs_plan_review:planned>c.amount-collected,
     };
   });
-  const performance=isPm?[]:all(db,"SELECT * FROM users WHERE role='sales' AND active=1 AND business_member=1 AND developer_admin=0").filter(u=>isAdmin||u.id===actor.id).map(u=>performanceFor(db,rules,u,month));
+  for(const opportunity of opportunities){
+    opportunity.signed_summary=signedOpportunitySummary(opportunity.id,contracts);
+    addSignedDiagnostics(opportunity);
+  }
+  const performance=isPm?[]:all(db,"SELECT * FROM users WHERE role='sales' AND business_member=1 AND developer_admin=0").filter(u=>isAdmin||u.id===actor.id).map(u=>performanceFor(db,rules,u,month,{inputs:scoringInputs})).filter(p=>!p.inactive||month<period()&&(p.review_id||p.score_ledger?.length||p.actual>0));
   const team=users.filter(u=>u.active&&(u.role==='sales'||u.id===managerId(db,rules))&&(isAdmin||u.id===actor.id)).map(u=>{
     const o=opportunities.filter(o=>o.owner_id===u.id),c=contracts.filter(c=>c.owner_id===u.id&&c.lifecycle!=='草稿');
     const review=performance.find(p=>p.user_id===u.id);
-    return {...u,process:review?.process||{raw:0,weighted:0,meeting:0,visit:0,quote:0,funnelCount:0},performance:review||null,pipeline:sum(o.filter(o=>!['赢单','输单','搁置'].includes(o.stage)),o=>o.amount),activeCount:o.filter(o=>!['赢单','输单','搁置'].includes(o.stage)).length,riskCount:o.filter(o=>o.risk.level!=='normal').length,followCount:activities.filter(a=>o.some(o=>o.id===a.opportunity_id)&&elapsed(a.activity_date)<=7&&a.activity_type!=='系统').length,signed:sum(c.filter(c=>c.sign_date.startsWith(month)),c=>c.amount),collected:sum(c.flatMap(c=>c.payments).filter(p=>p.status==='已到账'&&p.pay_date?.startsWith(month)),p=>p.amount),target:one(db,'SELECT amount FROM targets WHERE user_id=? AND quarter=?',u.id,quarter())?.amount||0,sourceCoverage:[...new Set(events.filter(e=>o.some(o=>o.id===e.opportunity_id)&&elapsed(e.activity_date)<=7).map(e=>e.source))]};
+    return {...u,process:review?.process||{raw:0,weighted:0,meeting:0,visit:0,quote:0,funnelCount:0},performance:review||null,pipeline:sum(o.filter(o=>!['赢单','输单','搁置'].includes(o.stage)),o=>o.amount),activeCount:o.filter(o=>!['赢单','输单','搁置'].includes(o.stage)).length,riskCount:o.filter(o=>o.risk.level!=='normal').length,followCount:activities.filter(a=>a.source_withdrawn!==true&&o.some(o=>o.id===a.opportunity_id)&&elapsed(a.activity_date)<=7&&a.activity_type!=='系统').length,signed:sum(c.filter(c=>c.sign_date.startsWith(month)),c=>c.amount),collected:sum(c.flatMap(c=>c.payments).filter(p=>p.status==='已到账'&&p.pay_date?.startsWith(month)),p=>p.amount),target:one(db,'SELECT amount FROM targets WHERE user_id=? AND quarter=?',u.id,quarter())?.amount||0,sourceCoverage:[...new Set(events.filter(e=>o.some(o=>o.id===e.opportunity_id)&&elapsed(e.activity_date)<=7).map(e=>e.source))]};
   });
   const commission=isPm?{previews:[],batches:[]}:commissionPreview(db,rules,actor,context.commissionPeriod);
   const imported=importHistory(db,actor,{customer:customers.filter(c=>!c.shared),contact:contactsRaw.filter(c=>customerIds.has(c.customer_id)),opportunity:opportunities,activity:activities,quote:quotes,contract:contracts,contract_item:contracts.flatMap(c=>c.items),payment:contracts.flatMap(c=>c.payments),attachment:contracts.flatMap(c=>c.attachments),commission:commission.batches});
@@ -139,7 +225,7 @@ export function buildState(context,actor) {
     const locked_months=confirmedMonths.filter(r=>r.user_id===t.user_id&&`${r.month.slice(0,4)}Q${Math.ceil(Number(r.month.slice(5,7))/3)}`===t.quarter).map(r=>r.month);
     return {...t,locked:locked_months.length>0,locked_months};
   }):[];
-  return {actor:publicUser(actor),demo,today:today(),period:month,quarter:quarter(),rules:isAdmin?rules:{thresholds:rules.thresholds,sop:rules.sop,commission_visible:true,result_visible:true,performance:rules.performance},stages:STAGES,users:isAdmin?users:users.map(u=>({id:u.id,name:u.name,role:u.role,active:u.active})),customers,opportunities,activities,activityEvents:events.filter(e=>oppIds.has(e.opportunity_id)),quotes,contracts,contacts:contactsRaw.filter(c=>customerIds.has(c.customer_id)),team,performance,commission,
+  return {actor:publicUser(actor),demo,today:today(),period:month,quarter:quarter(),rules:isAdmin?rules:{thresholds:rules.thresholds,sop:rules.sop,commission_visible:true,result_visible:true,performance:rules.performance},stages:STAGES,users:isAdmin?users:users.map(u=>({id:u.id,name:u.name,role:u.role,active:u.active})),customers,opportunities,activities,activityEvents,performanceLocks,performance_updated_at:now(),quotes,contracts,contacts:contactsRaw.filter(c=>customerIds.has(c.customer_id)),team,performance,commission,
     targets,contractDashboard:contractDashboard(contracts,month),collections:importedCollections(contracts,importedSources.collections,{hideMargin:isPm,maintainedFields}),
     stageHistory:all(db,'SELECT * FROM stage_history ORDER BY id').filter(h=>oppIds.has(h.opportunity_id)),
     refresh:{enabled:false,schedule:null,missedRunPolicy:null,lastRun:one(db,'SELECT created_at FROM daily_reports ORDER BY day DESC LIMIT 1')?.created_at||null},

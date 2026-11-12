@@ -14,12 +14,12 @@ import { formOptions } from "./modules/shared.js";
 import { workbench } from "./modules/workbench.js";
 import { customers, customerDetail,formCustomers } from "./modules/customers.js";
 import { opportunities, opportunityDetail,formOpportunities } from "./modules/opportunities.js";
+import {formQuotes} from './modules/quotes.js';
 import { activities,formActivities } from "./modules/activities.js";
 import {
   contracts,
   contractDetail,
   contractItemRow,
-  quoteItemRow,
   formContracts,
 } from "./modules/contracts.js";
 import { dashboard } from "./modules/dashboards.js";
@@ -35,7 +35,7 @@ import {minutesPage} from './modules/minutes.js';
 export { filtered, timeline } from "./modules/shared.js";
 export { customerDetail } from "./modules/customers.js";
 export { opportunityDetail } from "./modules/opportunities.js";
-export { contractDetail, contractItemRow,quoteItemRow } from "./modules/contracts.js";
+export { contractDetail, contractItemRow } from "./modules/contracts.js";
 
 export const pages = {
   intake: ['AI接收',''], workbench: ['工作台',''], customers: ['客户档案',''],
@@ -50,7 +50,7 @@ export function shell(S, page) {
   const nav = (id, ico, label, count = "") => {
     if(S.actor.role==='pm'&&['team','analytics','minutes'].includes(id))return '';
     const link=`<a href="#${id}" class="nav-item ${page === id ? "active" : ""}" ${page === id ? 'aria-current="page"' : ""}>${icon(ico)}<span>${id==='team'?'团队管理':label}</span>${count !== "" ? `<span class="nav-count">${count}</span>` : ""}</a>`;
-    if(id==='team')return (admin?link:'')+nav('performance','team','绩效评定')+nav('commissions','wallet','提成结算')+(admin?nav('funnel','chart','漏斗转化')+nav('assets','customers','客户资产')+nav('personal','dashboard','个人作战看板'):'');
+    if(id==='team')return (admin?link:'')+nav('performance','team','绩效评定')+nav('commissions','wallet','提成结算')+(admin?nav('funnel','chart','漏斗转化')+nav('assets','customers','客户资产'):'')+(admin||S.actor.role==='sales'?nav('personal','dashboard','个人作战看板'):'');
     return link;
   };
   const riskCount = S.opportunities.filter(
@@ -61,8 +61,11 @@ export function shell(S, page) {
 
 export function pageHeader(S, P) {
   const page = P.view;
-  let buttons=page==='minutes'?(S.actor.role==='admin'?'':badge('本人账号授权','blue'))+button('刷新数据','minutes-list-refresh','','secondary','refresh'):'';
+  let buttons=page==='minutes'?button('刷新列表','minutes-list-refresh','','secondary','refresh'):'';
   if(manualEntryEnabled(S,P))buttons=button('手动导入','manual-entry','','primary','plus');
+  if(page==='activities'&&manualEntryEnabled(S,P))buttons=button('记录跟进','new-activity','','primary','plus');
+  if(page==='customers'&&['admin','sales'].includes(S.actor.role))buttons=button('新建联系人','new-contact','','secondary','plus')+button('新建客户','new-customer','','primary','plus');
+  if(page==='opportunities'&&['admin','sales'].includes(S.actor.role))buttons=button('新建商机','new-opportunity','','primary','plus');
   if(page==='contracts'&&canManageContractData(S))buttons=(S.actor.role==='admin'?button('迁移核对','data-review','','secondary'):'')+button('删除与恢复','records-recycle','','secondary')+button('历史台账','contract-history','','secondary','clock')+button('新增合同','new-contract','','primary','plus');
   if(page==='collections'&&canManageContractData(S))buttons=button('新增收款计划','new-payment-plan','','secondary','plus')+button('登记实际到账','new-payment','','primary','wallet');
   if(S.actor.role==='admin'&&page==='customers')buttons=button('维护客户等级','customer-levels','','secondary','edit')+buttons;
@@ -79,7 +82,9 @@ export function pageHeader(S, P) {
   });
   if(page==='collections'&&canManageContractData(S))buttons=(S.actor.role==='admin'?button('迁移核对','data-review','','secondary'):'')+button('删除与恢复','records-recycle','','secondary')+buttons;
   if(page==='performance'&&S.actor.role==='admin')buttons=button('结算差额核对','settlement-review','','secondary')+buttons;
-  return `<div class="page-heading ${page==='minutes'?'minutes-heading':''}"><div><h1>${page === "workbench" ? `${esc(S.actor.name)}，${new Date().getHours() < 12 ? "上午" : "下午"}好` : S.actor.role === "sales" && page === "team" ? "过程绩效" : page==='minutes'&&S.actor.role==='sales'?'我的钉钉听记':pages[page][0]}</h1>${page==='minutes'?`<p>${S.actor.role==='admin'?'查看所有成员已授权的闪记、录音与同步进度，可按账号筛选。':'本人创建的闪记与录音，默认查看全部听记。'}</p>`:''}${page==='workbench'?`<p>${date}</p>`:''}</div><div class="heading-actions">${buttons}</div></div>`;
+  const workbenchTitle={admin:'团队工作台',sales:'我的工作台',pm:'协作工作台'}[S.actor.role]||'工作台';
+  const management=['analytics','team','funnel','assets','personal'].includes(page);
+  return `<div class="page-heading ${page==='minutes'?'minutes-heading':page==='workbench'?'workbench-heading':management?'management-heading':''}"><div><h1>${page==='workbench'?workbenchTitle:S.actor.role==='sales'&&page==='team'?'过程绩效':page==='minutes'&&S.actor.role==='sales'?'我的钉钉听记':pages[page][0]}</h1>${page==='minutes'?`<p>${S.actor.role==='admin'?'查看所有成员已授权的闪记、录音与同步进度，可按账号筛选。':'本人创建的闪记与录音，默认查看全部听记。'}</p>`:''}${page==='workbench'?`<p>${date}</p>`:''}</div><div class="heading-actions">${buttons}</div></div>`;
 }
 
 export function renderPage(S, P) {
@@ -99,7 +104,7 @@ export function renderPage(S, P) {
       contracts,
       analytics: dashboard, funnel: dashboard, assets: dashboard, collections:collectionsPage, personal: dashboard,
       performance, commissions,
-      team: teamManagement,
+      team: (state, params) => `<link rel="stylesheet" href="./modules/management.css">${teamManagement(state, params)}`,
       audit: auditView,
     }[P.view] || workbench;
   return pageHeader(S, P) + render(S, P);
@@ -111,16 +116,31 @@ export function formContent(S, type, id, quarter) {
   if(type==='payment-allocation')return formContracts(S,type,id,formOptions(S));
   if(type==='target')return targetForm(S,id,quarter);
   if(type==='performance-review')return formIncentives(S,type,id);
+  if(['activity-event-edit','activity-event-void','activity-legacy-edit','activity-legacy-void'].includes(type))return formActivities(S,type,id,{});
   if(manualFormRoles[type]&&!manualFormRoles[type].includes(S.actor.role))return empty('无权手动录入此类资料','请使用当前账号可维护的业务类型。');
   const options=formOptions(S);
-  if(['customer','contact'].includes(type)) {
+  if(['customer','contact','edit-customer','edit-contact','customer-transfer'].includes(type)) {
+    if(['edit-customer','edit-contact','customer-transfer'].includes(type)){
+      const record=type==='edit-contact'?S.contacts.find(p=>p.id===Number(id)):S.customers.find(c=>c.id===Number(id));
+      const customer=type==='edit-contact'?S.customers.find(c=>c.id===record?.customer_id):record;
+      if(!customer)return empty('客户不存在或无权访问');
+      if(!['admin','sales'].includes(S.actor.role)||S.actor.role!=='admin'&&customer.owner_id!==S.actor.id||type==='customer-transfer'&&S.actor.role!=='admin')return empty('当前账号无权维护此客户');
+    }
     if(type==='contact'&&!options.customerOptions.length)return empty('请先新建客户','联系人必须关联已有客户。',button('新建客户','new-customer','','primary','plus'));
     return formCustomers(S,type,id,options);
   }
-  if(type==='opportunity')return formOpportunities(S,type,id,options);
+  if(['opportunity','edit-opportunity','opportunity-stage'].includes(type)){
+    if(type!=='opportunity'){
+      const o=S.opportunities.find(o=>o.id===Number(id));
+      if(!o)return empty('商机不存在或无权访问');
+      if(S.actor.role!=='admin'&&(S.actor.role!=='sales'||o.owner_id!==S.actor.id))return empty('当前账号无权维护此商机');
+    }
+    return formOpportunities(S,type,id,options);
+  }
   if(['activity','quote'].includes(type)&&!options.oppOptions.length)return empty('请先新建商机','跟进与报价必须关联已有商机。',S.actor.role!=='pm'?button('新建商机','new-opportunity','','primary','plus'):'');
   if(type==='activity')return formActivities(S,type,id,options);
-  if(['quote','contract','convert','payment','archive-contract'].includes(type)) {
+  if(type==='quote')return formQuotes(S,id,options);
+  if(['contract','convert','payment','archive-contract'].includes(type)) {
     if(type==='contract'&&!options.customerOptions.length)return empty('请先新建客户','合同必须关联客户或商机。',button('新建客户','new-customer','','primary','plus'));
     if(type==='payment'&&!S.contracts.length)return empty('请先新建合同','回款必须关联已有合同。',button('新建合同','new-contract','','primary','plus'));
     return formContracts(S,type,id,options);

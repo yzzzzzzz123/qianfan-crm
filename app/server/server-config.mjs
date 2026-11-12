@@ -1,10 +1,12 @@
 import path from 'node:path';
 
 export function serverAIEnvironment(config) {
-  if(!config||config.provider!=='zimaocloud'||config.model!=='deepseek-v4-1-flash'||config.base_url!=='https://aiclub.zimaocloud.com/model/openApi/v1')throw new Error('服务器AI配置须使用紫猫云 DeepSeek V4.1 Flash');
+  const providers={zimaocloud:{model:'deepseek-v4-1-flash',base:'https://aiclub.zimaocloud.com/model/openApi/v1'},ppio:{model:'qwen/qwen3.8-max',base:'https://api.ppio.com/openai/v1'}};
+  const selected=providers[config?.provider];
+  if(!selected||config.model!==selected.model||config.base_url!==selected.base)throw new Error('服务器AI配置与已支持的提供方、模型及地址不一致');
   if(typeof config.apiKey!=='string'||!/^[!-~]{16,2048}$/.test(config.apiKey))throw new Error('服务器AI私有凭据无效');
   if(typeof config.python_executable!=='string'||!/^\/srv\/qianfan-crm\/runtime\/[a-zA-Z0-9_./-]+\/bin\/python3$/.test(config.python_executable)||config.python_executable.split('/').includes('..'))throw new Error('服务器文件解析器须位于CRM独立运行环境');
-  return {AI_API_KEY:config.apiKey,...(config.searchApiKey?{PPIO_SEARCH_API_KEY:config.searchApiKey}:{}),CRM_PYTHON:config.python_executable};
+  return {CRM_AI_PROVIDER:config.provider,AI_API_KEY:config.apiKey,...(config.searchApiKey||config.provider==='ppio'?{PPIO_SEARCH_API_KEY:config.searchApiKey||config.apiKey}:{}),CRM_PYTHON:config.python_executable};
 }
 
 export function serverEnvironment(config) {

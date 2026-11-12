@@ -1,5 +1,5 @@
 import {AppError,assert} from './domain.mjs';
-import {AI_MODEL,AI_ENDPOINT} from './ai-intake.mjs';
+import {AI_MODEL,AI_ENDPOINT,AI_REQUEST_OPTIONS} from './ai-intake.mjs';
 
 // PPIO's documented search API uses the same workbench credential as Qwen.
 export const COMPANY_SEARCH_ENDPOINT='https://api.ppio.com/v3/web-search';
@@ -34,7 +34,7 @@ export function createQwenCompanyProfile({env=process.env,fetcher=fetch}={}){
     const pages=data.webPages.value.slice(0,8).map((p,i)=>({id:i+1,title:String(p.name||'').slice(0,500),url:companySourceUrl(p.url),text:[p.name,p.snippet,p.summary].filter(v=>typeof v==='string').join('\n').slice(0,16000)}))
       .filter(p=>p.url&&name(p.text).includes(wantedName)&&(!wantedCode||verifiedIdentity||normalize(p.text).includes(wantedCode)));
     if(!pages.length)return {details:{},sources:[],field_sources:{},reason:'AI 联网检索未找到足以确认该企业主体的公开资料'};
-    const result=await jsonResponse(fetcher,AI_ENDPOINT,key,{model:AI_MODEL,messages:[{role:'system',content:COMPANY_QWEN_SYSTEM},{role:'user',content:JSON.stringify({customer:{name:customer.name,credit_code:customer.credit_code||null},pages})}],temperature:0,max_tokens:6000,response_format:{type:'json_object'},thinking:{type:'disabled'},stream:false},80000);
+    const result=await jsonResponse(fetcher,AI_ENDPOINT,key,{model:AI_MODEL,messages:[{role:'system',content:COMPANY_QWEN_SYSTEM},{role:'user',content:JSON.stringify({customer:{name:customer.name,credit_code:customer.credit_code||null},pages})}],temperature:0,max_tokens:6000,response_format:{type:'json_object'},...AI_REQUEST_OPTIONS,stream:false},80000);
     if(result.choices?.[0]?.finish_reason!=='stop')throw failure();
     let parsed;try{parsed=JSON.parse(result.choices[0].message.content);}catch{throw failure();}
     if(!object(parsed)||name(parsed.company_name)!==wantedName||wantedCode&&parsed.credit_code&&normalize(parsed.credit_code)!==wantedCode||!object(parsed.fields))throw failure();
@@ -44,7 +44,7 @@ export function createQwenCompanyProfile({env=process.env,fetcher=fetch}={}){
       const page=pages.find(p=>p.id===item.source_id),quote=normalize(item.evidence),value=normalize(item.value);
       if(!page||!normalize(page.text).includes(quote)||!quote.includes(value))continue;
       if(field==='company_name'&&name(item.value)!==wantedName||field==='credit_code'&&wantedCode&&value!==wantedCode)continue;
-      details[field]=item.value.trim();field_sources[field]='deepseek';evidence[field]={source_id:page.id,quote:item.evidence};
+      details[field]=item.value.trim();field_sources[field]=AI_MODEL.startsWith('qwen/')?'qwen':'deepseek';evidence[field]={source_id:page.id,quote:item.evidence};
       if(!sources.some(s=>s.id===page.id))sources.push({id:page.id,title:page.title,url:page.url});
     }
     return {details,sources,field_sources,evidence,reason:Object.keys(details).length?'AI 根据公开检索资料摘录，未经企查查核验':'AI 未提取到有原文依据的企业资料'};

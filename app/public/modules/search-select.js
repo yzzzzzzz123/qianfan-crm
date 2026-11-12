@@ -1,3 +1,5 @@
+import {bindCommittedSearch,isCompositionEvent,isSearchComposing} from './search-input.js';
+
 // Keep native selects as the form and change-event contract; enhance all dynamic views.
 export function installSearchSelects(){
  const controls=new WeakMap();let active=null,frame=0,serial=0;
@@ -11,8 +13,20 @@ export function installSearchSelects(){
  const highlight=()=>{[...list.children].forEach((e,i)=>{e.classList.toggle('is-active',i===index);if(i===index){e.id=list.id+'-active';input.setAttribute('aria-activedescendant',e.id);e.scrollIntoView({block:'nearest'});}else e.removeAttribute('id');});};
  const choose=i=>{const o=visible[i];if(!o)return;if(s.multiple)o.selected=!o.selected;else s.value=o.value;s.dispatchEvent(new Event('input',{bubbles:true}));s.dispatchEvent(new Event('change',{bubbles:true}));sync(s,c);if(s.multiple)render();else{close();c.button.focus();}};
  function render(){const q=input.value.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);visible=[...s.options].filter(o=>!o.disabled&&!o.parentElement.disabled&&q.every(t=>(o.textContent+' '+o.value+' '+(o.parentElement.label||'')).toLocaleLowerCase().includes(t)));list.replaceChildren();for(const [i,o] of visible.entries()){const b=document.createElement('button');b.type='button';b.setAttribute('role','option');b.setAttribute('aria-selected',String(o.selected));b.textContent=(s.multiple?(o.selected?'☑ ':'☐ '):'')+(o.parentElement.tagName==='OPTGROUP'?o.parentElement.label+' · ':'')+o.textContent;b.addEventListener('click',()=>choose(i));list.append(b);}if(!visible.length){const p=document.createElement('p');p.textContent='没有匹配选项，请换个关键词';p.className='search-select-empty';list.append(p);}index=visible.findIndex(o=>o.selected);place();}
- input.addEventListener('input',render);input.addEventListener('keydown',e=>{if(e.key==='ArrowDown'||e.key==='ArrowUp'){e.preventDefault();if(visible.length){index=(index+(e.key==='ArrowDown'?1:-1)+visible.length)%visible.length;highlight();}}if(e.key==='Enter'){e.preventDefault();if(index<0)index=0;choose(index);}if(e.key==='Escape'){e.preventDefault();e.stopPropagation();close();c.button.focus();}if(e.key==='Tab')close();});active.reposition=place;render();input.focus({preventScroll:true});
+ bindCommittedSearch(menu,'.search-select-query',render);
+ input.addEventListener('keydown',e=>{
+   if(isCompositionEvent(e))return;
+   if(e.key==='ArrowDown'||e.key==='ArrowUp'){e.preventDefault();if(visible.length){index=(index+(e.key==='ArrowDown'?1:-1)+visible.length)%visible.length;highlight();}}
+   if(e.key==='Enter'){e.preventDefault();if(index<0)index=0;choose(index);}
+   if(e.key==='Escape'){e.preventDefault();e.stopPropagation();close();c.button.focus();}
+   if(e.key==='Tab')close();
+ });
+ active.reposition=place;render();input.focus({preventScroll:true});
  }
  function enhance(){frame=0;for(const s of document.querySelectorAll('select')){if(s.dataset.searchSelect==='off')continue;let c=controls.get(s);if(!c){const wrap=document.createElement('span');wrap.className='search-select';s.before(wrap);wrap.append(s);const button=document.createElement('button');button.type='button';button.className='search-select-trigger';button.setAttribute('role','combobox');button.setAttribute('aria-haspopup','listbox');button.setAttribute('aria-expanded','false');const value=document.createElement('span');button.append(value);const arrow=document.createElement('span');arrow.textContent='⌄';arrow.setAttribute('aria-hidden','true');button.append(arrow);wrap.append(button);s.classList.add('search-select-native');s.tabIndex=-1;s.setAttribute('aria-hidden','true');c={wrap,button,value};controls.set(s,c);button.addEventListener('click',()=>active?.s===s?close():open(s,c));button.addEventListener('keydown',e=>{if(['ArrowDown','ArrowUp',' '].includes(e.key)){e.preventDefault();open(s,c);}});s.addEventListener('change',()=>sync(s,c));s.addEventListener('invalid',e=>{e.preventDefault();button.focus();open(s,c);});}sync(s,c);}}
- const observer=new MutationObserver(()=>{if(!frame)frame=requestAnimationFrame(enhance);if(active&&!active.s.isConnected)close();});observer.observe(document.documentElement,{subtree:true,childList:true,attributes:true,attributeFilter:['disabled','selected','label','hidden']});document.addEventListener('pointerdown',e=>{if(active&&!active.wrap.contains(e.target))close();});document.addEventListener('keydown',e=>{if(e.key==='Escape'&&active){e.preventDefault();e.stopImmediatePropagation();close();}},true);document.addEventListener('scroll',e=>{if(active&&!active.menu.contains(e.target))active.reposition?.();},true);window.addEventListener('resize',close);enhance();
+ const observer=new MutationObserver(()=>{if(!frame)frame=requestAnimationFrame(enhance);if(active&&!active.s.isConnected)close();});observer.observe(document.documentElement,{subtree:true,childList:true,attributes:true,attributeFilter:['disabled','selected','label','hidden']});document.addEventListener('pointerdown',e=>{if(active&&!active.wrap.contains(e.target))close();});
+ document.addEventListener('keydown',e=>{if(e.key==='Escape'&&active&&!isCompositionEvent(e)){e.preventDefault();e.stopImmediatePropagation();close();}},true);
+ document.addEventListener('scroll',e=>{if(active&&!active.menu.contains(e.target))active.reposition?.();},true);
+ window.addEventListener('resize',()=>{if(isSearchComposing())active?.reposition?.();else close();});
+ enhance();
 }

@@ -53,16 +53,19 @@ test("M11-A04 各业务模块支持手动填写新建，文档上传统一保留
     ["payment", 1],
     ["rules", ""],
   ])
-    {const html=formContent(s,type,id);assert.ok(html.includes(`data-form="${type}"`),type);assert.doesNotMatch(html,/type="file"|type="password"/,type);}
+    {const html=formContent(s,type,id);assert.ok(html.includes(`data-form="${type}"`),type);assert.doesNotMatch(html,/type="password"/,type);if(type!=='quote')assert.doesNotMatch(html,/type="file"/,type);}
   assert.match(renderPage(s,{view:'intake'}),/data-form="ai-intake"/);
-  for(const view of ['analytics','customers','opportunities','activities'])assert.match(renderPage(s,{view,tab:'members'}),/data-action="manual-entry"/,view);
+  assert.match(renderPage(s,{view:'analytics',tab:'members'}),/data-action="manual-entry"/);
+  assert.match(renderPage(s,{view:'activities'}),/data-action="new-activity"/);
   assert.match(renderPage(s,{view:'contracts'}),/data-action="new-contract"/);
   assert.match(renderPage(s,{view:'collections'}),/data-action="new-payment"/);
   assert.match(renderPage(s,{view:'collections'}),/data-action="new-payment-plan"/);
   for(const view of ['team'])assert.doesNotMatch(renderPage(s,{view,tab:'members'}),/data-action="manual-entry"|data-action="new-user"/,view);
   assert.doesNotMatch(formContent(s,'user',''),/data-form="user"|name="ding_user_id"|name="username"/);
   for(const view of Object.keys(pages))assert.doesNotMatch(renderPage(s,{view,tab:'members'}),/data-action="mirror-import"/);
-  assert.match(formContent(s,'edit-customer',1),/资料统一交给AI接收/);
+  assert.match(renderPage(s,{view:'customers'}),/data-action="new-customer"/);
+  assert.match(renderPage(s,{view:'opportunities'}),/data-action="new-opportunity"/);
+  assert.match(formContent(s,'edit-customer',1),/data-form="edit-customer"/);
 });
 test("M11-A05 销售可编辑本人合同及回款，管理页面和归档仍受限", async (t) => {
   const f = await fixture(t);
@@ -120,7 +123,7 @@ test("M11-A06 客户输入的HTML按文本显示，不进入可执行标签", as
 test('同一记录保留唯一操作，行级设置不再叠加页面入口',async t=>{
   const f=await fixture(t),actor=await f.login(1),s=(await f.request('/state',{actor})).body;
   for(const [view,action] of [['customers','customer'],['opportunities','opportunity'],['contracts','contract']]) {
-    const html=renderPage(s,{view});
+    const html=renderPage(s,{view,...(view==='opportunities'?{opportunityView:'ledger'}:{})});
     const ids=[...html.matchAll(new RegExp(`<tr[^>]*data-action="${action}" data-id="([^"]+)"`,'g'))].map(m=>m[1]);
     assert.ok(ids.length>0,view);
     assert.equal(new Set(ids).size,ids.length,view+'详情入口重复');

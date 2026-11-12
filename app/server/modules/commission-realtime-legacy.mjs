@@ -13,7 +13,6 @@ export function realtimeLegacyCommissionPreviews(db, rules, actor, requested, le
   if (!actor || actor.role === 'pm') return [];
   const policy = rules.commission;
   const selected = requested || periodFor(today(), policy.period);
-  const monthly = /^\d{4}-\d{2}$/.test(selected) && !!policy.sales_policy;
   const actualPeriod = /^\d{4}-\d{2}$/.test(selected) ? periodFor(`${selected}-01`, policy.period) : selected;
   const manager = one(db, "SELECT id FROM users WHERE id=? AND active=1 AND role='admin' AND business_member=1 AND developer_admin=0", policy.manager_id || 0)?.id
     || one(db, "SELECT id FROM users WHERE active=1 AND role='admin' AND business_member=1 AND developer_admin=0 ORDER BY id LIMIT 1")?.id;
@@ -27,12 +26,8 @@ export function realtimeLegacyCommissionPreviews(db, rules, actor, requested, le
   const result = [];
 
   for (const user of users) {
-    if (monthly && user.id !== manager) continue;
     if (actor.role !== 'admin' && actor.id !== user.id) continue;
     for (const kind of user.id === manager ? ['personal', 'management'] : ['personal']) {
-      // Personal orders share the monthly sales policy, including the manager's
-      // own orders. Only team management keeps its separate cumulative period.
-      if (monthly && kind === 'personal') continue;
       const matching = contracts.filter(c => kind === 'personal' ? c.owner_id === user.id : c.owner_id !== manager);
       const contractIssues = new Map();
       const addIssue = (contract, code, message, pending = true) => {

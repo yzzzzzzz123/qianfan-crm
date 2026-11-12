@@ -1,5 +1,7 @@
 import { assert, choice, text, cents, validDate, now } from "../domain.mjs";
 import {intakeSchema} from '../../public/modules/intake-schema.js';
+import {validateUpload} from '../ai-intake.mjs';
+import {attachQuoteFile} from './source-records.mjs';
 
 /** quotes: unmatched routes return undefined; transaction and idempotency are owned by service.mjs. */
 export function handleQuotes(context) {
@@ -26,16 +28,18 @@ export function handleQuotes(context) {
       assert(Number.isSafeInteger(amount)&&amount>0&&amount<=1e12,'报价总金额须大于零且在允许范围内');
       if(b.amount!==undefined)assert(cents(b.amount,'报价总额')===amount,'报价总额与明细折后合计不一致');
     }
+    const file = b.file == null ? null : validateUpload({files:[b.file]}).files[0];
     const id = insert("quotes", {
       opportunity_id: o.id,
       user_id: o.owner_id,
       amount,
       items:JSON.stringify(items),
-      valid_until: validDate(b.valid_until, "报价有效期"),
+      valid_until: validDate(b.valid_until, "报价有效期", true) ?? '',
       note: text(b.note || "", "报价说明", 2000, false),
       created_at: now(),
     });
-    audit(actor, "登记报价", "opportunity", o.id, { quote_id: id });
-    return { id, message: "报价已登记，可在商机详情导出报价文件" };
+    const attachment = file ? {attachment_id:attachQuoteFile(context,id,file)} : {};
+    audit(actor, "登记报价", "opportunity", o.id, {quote_id:id,...attachment});
+    return {id,...attachment,message:"报价已登记"};
   }
 }

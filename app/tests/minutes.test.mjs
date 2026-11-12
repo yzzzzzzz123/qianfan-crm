@@ -39,7 +39,7 @@ test('本人设备授权核验、明确确认后才建连接；新增采集与�
   const f=await context(t),id=await f.connect();assert.equal(one(f.db,'SELECT COUNT(*) n FROM minutes_records').n,0);
   const source=one(f.db,'SELECT * FROM minutes_sources WHERE id=?',id);assert.equal(source.member_id,2);assert.equal(source.collect_from,new Date(f.start).toISOString());
   f.upstream.items=[f.item('old-note',f.start-86400000),f.item()];t.mock.timers.tick(1000);
-  const r=await f.sync(id);assert.equal(r.status,200,JSON.stringify(r.body));assert.equal(r.body.fetched,1);assert.equal(r.body.status,'partial');
+  const r=await f.sync(id);assert.equal(r.status,200,JSON.stringify(r.body));assert.equal(r.body.fetched,1);assert.equal(r.body.status,'success');
   assert.deepEqual(all(f.db,'SELECT external_id FROM minutes_records').map(x=>x.external_id),['new-note']);
   const state=(await f.request('/state',{actor:f.sales})).body;assert.equal(state.minutes.count,1);assert.ok(!JSON.stringify(state.minutes).includes('credential_key'));assert.ok(!JSON.stringify(state.minutes).includes('accessToken'));
   assert.match(shell(state,'minutes'),/href="#minutes"/);assert.match(renderPage(state,{view:'minutes'}),/客户沟通 &lt;script&gt;/);assert.match(opportunityDetail(state,1),/查看关联听记/);assert.match(customerDetail(state,1),/查看关联听记/);
@@ -56,7 +56,7 @@ test('历史任务立即返回并分页读取连接前听记，增量水位、�
   assert.equal((await f.request(`/minutes/sources/${id}/history`,{actor:f.sales,method:'POST',body:{}})).status,409);
   const busy=(await f.request('/state',{actor:f.sales})).body;assert.equal(busy.minutes.sources[0].history.status,'running');
   release();f.upstream.hold=null;await f.service.minutes.shutdown();
-  const finished=one(f.db,'SELECT * FROM minutes_sync_runs WHERE id=?',job.body.id);assert.equal(finished.mode,'history');assert.equal(finished.pages,2);assert.equal(finished.fetched,2);assert.equal(finished.status,'partial');assert.equal(finished.cursor,null);
+  const finished=one(f.db,'SELECT * FROM minutes_sync_runs WHERE id=?',job.body.id);assert.equal(finished.mode,'history');assert.equal(finished.pages,2);assert.equal(finished.fetched,2);assert.equal(finished.status,'success');assert.equal(finished.cursor,null);
   assert.equal(f.upstream.calls.at(-2).from,null);assert.equal(f.upstream.calls.at(-1).cursor,'next-history-page');
   assert.equal(one(f.db,'SELECT synced_until FROM minutes_sources WHERE id=?',id).synced_until,watermark);
   assert.deepEqual(all(f.db,'SELECT external_id FROM minutes_records ORDER BY external_id').map(r=>r.external_id),['new-note','old-shared-note']);
@@ -65,7 +65,7 @@ test('历史任务立即返回并分页读取连接前听记，增量水位、�
   const second=await f.request(`/minutes/sources/${id}/history`,{actor:f.sales,method:'POST',body:{}});assert.equal(second.status,200);await f.service.minutes.shutdown();
   const kept=one(f.db,'SELECT * FROM minutes_records WHERE id=?',r.id);assert.equal(kept.opportunity_id,1);assert.equal(kept.revision,2);assert.equal(one(f.db,'SELECT COUNT(*) n FROM minutes_records').n,2);
   assert.equal(one(f.db,'SELECT COUNT(*) n FROM activities WHERE minutes_record_id=?',r.id).n,1);
-  const state=(await f.request('/state',{actor:f.sales})).body;assert.doesNotMatch(renderPage(state,{view:'minutes'}),/钉钉账号连接|minutes-history|minutes-disconnect/);assert.equal(state.minutes.sources[0].history.status,'partial');assert.ok(!JSON.stringify(state.minutes).includes('next-history-page'));
+  const state=(await f.request('/state',{actor:f.sales})).body;assert.match(renderPage(state,{view:'minutes'}),/data-minutes-connections/);assert.match(renderPage(state,{view:'minutes'}),/data-action="minutes-history"/);assert.equal(state.minutes.sources[0].history.status,'success');assert.ok(!JSON.stringify(state.minutes).includes('next-history-page'));
 });
 
 test('历史读取失败保存分页游标，重新读取从上次已提交页面继续',async t=>{
@@ -79,7 +79,7 @@ test('历史读取失败保存分页游标，重新读取从上次已提交页�
   const state=(await f.request('/state',{actor:f.sales})).body;assert.equal(state.minutes.sources[0].history.status,'failed');assert.ok(!JSON.stringify(state.minutes).includes('resume-page-two'));
   fail=false;const before=f.upstream.calls.length;const resumed=await f.request(`/minutes/sources/${id}/history`,{actor:f.sales,method:'POST',body:{}});assert.equal(resumed.body.id,start.body.id);await f.service.minutes.shutdown();
   assert.equal(f.upstream.calls[before].cursor,'resume-page-two');assert.equal(f.upstream.calls[before].to,job.to_time);
-  job=one(f.db,'SELECT * FROM minutes_sync_runs WHERE id=?',start.body.id);assert.equal(job.pages,2);assert.equal(job.fetched,2);assert.equal(job.status,'partial');assert.equal(job.cursor,null);assert.equal(one(f.db,'SELECT COUNT(*) n FROM minutes_records').n,2);
+  job=one(f.db,'SELECT * FROM minutes_sync_runs WHERE id=?',start.body.id);assert.equal(job.pages,2);assert.equal(job.fetched,2);assert.equal(job.status,'success');assert.equal(job.cursor,null);assert.equal(one(f.db,'SELECT COUNT(*) n FROM minutes_records').n,2);
   assert.equal(one(f.db,'SELECT synced_until FROM minutes_sources WHERE id=?',id).synced_until,null);
 });
 
@@ -226,7 +226,7 @@ test('同一成员可连接多个组织，复用授权不复制凭据；组织�
   f.upstream.items=[f.item('same-external-id')];t.mock.timers.tick(1000);await f.sync(primary);await f.sync(second);assert.equal(one(f.db,'SELECT COUNT(*) n FROM minutes_records').n,2);
   assert.equal((await f.request('/minutes?source_id='+second,{actor:f.sales})).body.count,1);
   assert.equal((await f.request(`/minutes/sources/${second}/disconnect`,{actor:f.sales,method:'POST',body:{}})).status,200);assert.equal(one(f.db,'SELECT connection_state FROM minutes_sources WHERE id=?',primary).connection_state,'connected');
-  const html=renderPage((await f.request('/state',{actor:f.sales})).body,{view:'minutes'});assert.doesNotMatch(html,/钉钉账号连接|连接其他组织|停止连接/);assert.match(html,/全部成员/);
+  const html=renderPage((await f.request('/state',{actor:f.sales})).body,{view:'minutes'});assert.match(html,/data-minutes-connections/);assert.match(html,/data-action="minutes-disconnect"/);assert.match(html,/全部可查看账号/);
 });
 
 test('保存的授权包含多个组织时精确选择当前或指定profile，不取第一个账号',async t=>{

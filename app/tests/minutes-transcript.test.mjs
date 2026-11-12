@@ -24,7 +24,7 @@ test('初次完整读取瞬时失败时重新读取全部分页，不直接保�
  let full=0;const read=createTranscriptReader(async args=>{if(args[1]==='+transcript'){if(++full===1)throw new Error('transient');return complete('record');}return {result:{paragraphList:[{paragraph:'第一屏片段'}],hasNext:true}};});
  assert.equal((await read('record')).content,'发言人：完整正文');assert.equal(full,2);
 });
-test('逐字稿缺失时清楚标注已有总结，保留转义并且没有附加操作按钮',()=>{
+test('逐字稿缺失时清楚标注已有总结，保留转义并提供显式重读入口',()=>{
  const html=minuteArtifact('transcript',{state:'empty',content:'',reason:'钉钉本次未提供逐字稿正文'},1,true,'transcript',{state:'ready',content:'<script>总结</script>'});
- assert.match(html,/以下为已同步的 AI 总结/);assert.match(html,/&lt;script&gt;/);assert.doesNotMatch(html,/<button|该项尚无可展示正文/);
+ assert.match(html,/以下为已同步的 AI 总结/);assert.match(html,/&lt;script&gt;/);assert.match(html,/data-action="minutes-artifact-retry"/);assert.doesNotMatch(html,/该项尚无可展示正文/);
 });

@@ -86,10 +86,10 @@ test('读取期间注销、停止连接和并发点击都不会保存失效的�
  assert.equal((await f.post(f.admin)).status,409);assert.equal(one(f.db,'SELECT count(*) n FROM minutes_artifacts').n,0);
 });
 
-test('两项分析直接展示且没有操作按钮，旧占位不显示虚假读取时间，正文转义',()=>{
+test('两项分析保留明确重读入口，旧占位不冒充正在读取或显示虚假时间，正文转义',()=>{
  const old={state:'unavailable',content:'',checked_at:'2026-10-30T12:11:00Z',reason:'当前连接未返回可核验的发言人观点；未自动创建源平台分析任务'};
- const speaker=minuteArtifact('speaker_insights',old,1,true,'speaker_insights');assert.match(speaker,/正在读取/);assert.doesNotMatch(speaker,/<button|最近读取|由钉钉生成/);
- const quality=minuteArtifact('quality',old,1,true,'quality');assert.doesNotMatch(quality,/<button|最近读取|尚未返回|该项尚无可展示正文/);
+ const speaker=minuteArtifact('speaker_insights',old,1,true,'speaker_insights');assert.match(speaker,/当前来源暂未提供/);assert.match(speaker,/data-action="minutes-artifact-retry"/);assert.doesNotMatch(speaker,/正在读取|最近读取|由钉钉生成/);
+ const quality=minuteArtifact('quality',old,1,true,'quality');assert.match(quality,/data-action="minutes-artifact-retry"/);assert.doesNotMatch(quality,/正在读取|最近读取|尚未返回|该项尚无可展示正文/);
  const ready=minuteArtifact('speaker_insights',{state:'ready',content:'<script>alert(1)</script>'},1,false,'speaker_insights');assert.match(ready,/&lt;script&gt;/);assert.doesNotMatch(ready,/data-action="minutes-speaker/);
 });
 

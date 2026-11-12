@@ -1,0 +1,123 @@
+.management-segment-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding-inline: 0;
+}
+.management-segment-filters fieldset {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  padding: 2px 8px 6px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+.management-segment-filters input {
+  min-width: 0;
+  max-width: 130px;
+  padding: 5px;
+  font-size: 12px;
+}
+.management-segment-context {
+  margin: 0 0 10px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.management-segments > .metrics {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  padding: 0;
+  overflow: hidden;
+}
+.management-segments > .metrics .metric {
+  min-width: 0;
+  padding: 15px 16px;
+  border: 0;
+  border-inline-end: 1px solid var(--line);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  text-align: start;
+}
+.management-segments > .metrics .metric:last-child { border-inline-end: 0; }
+.management-segments > .metrics .metric:hover, .management-stage-card:hover { background: var(--sail-soft); }
+.management-segments > .metrics .metric:focus-visible, .management-stage-card:focus-visible {
+  outline: 2px solid var(--sail);
+  outline-offset: -2px;
+}
+.management-segments .metric-value {
+  display: block;
+  margin-block: 4px;
+  font-size: clamp(18px, 2.3vw, 28px);
+  overflow-wrap: anywhere;
+}
+.management-segments .metric-label {
+  min-width: 0;
+  gap: 4px;
+  line-height: 1.4;
+}
+.management-segments .metric-label .icon { flex-shrink: 0; }
+.management-metric-note, .management-stage-card > span:not(:first-child) { color: var(--muted); font-size: 11px; }
+.management-stage-grid, .management-structure-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 9px;
+  padding: 0 20px 20px;
+}
+.management-stage-card, .management-structure {
+  min-width: 0;
+  padding: 11px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--sheet);
+  color: inherit;
+  text-align: start;
+  overflow-wrap: anywhere;
+}
+.management-stage-card { display: grid; align-content: start; gap: 6px; cursor: pointer; }
+.management-stage-title { display: flex; align-items: baseline; justify-content: space-between; gap: 5px; font-weight: 600; }
+.management-stage-title b { color: var(--sail-deep); font-size: 12px; }
+.management-history > p { margin: 0 20px 16px; color: var(--muted); font-size: 12px; }
+.management-segment-list, .management-renewals, .management-structure ul { padding: 0; margin: 0; list-style: none; }
+.management-segments .management-segment-list { margin: 0 20px 7px; }
+.management-segment-list > li, .management-customer-content, .management-renewals li {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+.management-segment-list > li { border-bottom: 1px solid var(--line); padding: 12px 0; }
+.management-segment-list > li:last-child { border: 0; }
+.management-segment-list > li > div, .management-customer-content > div { min-width: 0; overflow-wrap: anywhere; }
+.management-segment-list button { max-width: 100%; overflow-wrap: anywhere; text-align: start; }
+.management-segment-list p { margin-top: 4px; color: var(--secondary); font-size: 12px; }
+.management-segment-list small, .management-renewals time { color: var(--muted); font-size: 11px; }
+.management-segment-end { text-align: end; }
+.management-segment-end small { display: block; }
+.management-segment-list .management-customer-row { display: block; }
+.management-customer-status { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 5px; }
+.management-renewals { padding-top: 8px; }
+.management-renewals li { padding: 6px 0; }
+.management-structure summary { cursor: pointer; color: var(--sail-deep); font-size: 13px; font-weight: 600; }
+.management-structure summary span { margin-left: 4px; color: var(--muted); font-size: 11px; font-weight: 400; }
+.management-structure li:first-child { margin-top: 8px; }
+.management-structure li button { display: flex; align-items: baseline; justify-content: space-between; gap: 6px; width: 100%; padding: 5px 0; text-align: start; }
+.management-structure li button b { flex-shrink: 0; }
+.management-structure p { margin: 8px 0 0; color: var(--muted); font-size: 11px; }
+@media (max-width: 720px) {
+  .management-segments > .metrics, .management-stage-grid, .management-structure-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .management-segments > .metrics .metric { padding: 11px 12px; }
+  .management-segments > .metrics .metric:nth-child(-n+2) { border-bottom: 1px solid var(--line); }
+  .management-segments > .metrics .metric:nth-child(even) { border-inline-end: 0; }
+  .management-stage-grid, .management-structure-grid { padding-inline: 12px; }
+  .management-segments .management-segment-list, .management-history > p { margin-inline: 12px; }
+}
+@media (max-width: 360px) {
+  .management-segment-filters fieldset { flex-wrap: wrap; }
+  .management-segment-filters input { max-width: 113px; }
+}

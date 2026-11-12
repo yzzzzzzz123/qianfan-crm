@@ -41,6 +41,66 @@ test('混合回款未分配使产品档位暂算，但正常服务仍为明确�
  const f=await setup(t),a=await f.create([product(100000,25000)]),b=await f.create([product(50000,25000),service(50000)]),c=await f.create([service(30000)]);await f.pay(a,100000);await f.pay(b,10000);await f.pay(c,30000);await f.grade();
  const p=f.personal();assert.equal(p.product_tier.status,'basis-incomplete');assert.equal(p.product_tier.distance_to_next,null);assert.equal(p.components[1].total,240000);assert.ok(p.estimated_total>=240000);assert.ok(p.contract_issues.some(i=>i.code==='receipt_split_missing'));
 });
+test('到账待办区分真实缺日期、跨月分配缺失和到账早于签约，并定位原流水',async t=>{
+ const f=await setup(t);
+ const productContract=await f.create([product(100000,25000)]);
+ const mixedContract=await f.create([product(60000,15000),service(40000)]);
+ const advanceContract=await f.create([product(100000,25000)]);
+ await f.grade();
+ const trigger=one(f.db,"SELECT sql FROM sqlite_master WHERE name='payments_production_insert'").sql;
+ f.db.exec('DROP TRIGGER payments_production_insert');
+ let undated;
+ try{
+   undated=Number(run(f.db,"INSERT INTO payments(contract_id,amount,status,created_at) VALUES(?,500000,'已到账','2026-11-01T08:00:00Z')",productContract).lastInsertRowid);
+ }finally{f.db.exec(trigger);}
+ const dated=await f.pay(productContract,20000);
+ async function post(path,body,method='POST'){
+   const result=await f.request(path,{actor:f.admin,method,body});
+   assert.equal(result.status,200,JSON.stringify(result.body));
+   return result.body.id;
+ }
+ const prior=await post('/payments',{contract_id:mixedContract,amount:10000,pay_date:'2026-10-28',status:'已到账'});
+ const later=await f.pay(mixedContract,20000,10000);
+ const missing=[await f.pay(mixedContract,1000),await f.pay(mixedContract,2000)];
+ run(f.db,"UPDATE contracts SET sign_date='2026-11-11' WHERE id=?",advanceContract);
+ const advance=await f.pay(advanceContract,20000);
+ const read=async()=>(await f.request('/state?commissionPeriod=2026-11',{actor:f.admin})).body;
+ const tasks=state=>commissionIssueRows(state).filter(task=>task.kind==='personal'&&task.sales_id===2);
+ const state=await read(),issues=tasks(state);
+ assert.deepEqual(issues.filter(i=>i.code==='receipt_date_missing').map(i=>[i.payment_id,i.affected_payment_ids]),[[undated,[dated]]]);
+ const blocked=issues.find(i=>i.code==='receipt_prior_incomplete');
+ assert.equal(blocked.payment_id,prior);
+ assert.equal(blocked.blocking_code,'receipt_split_missing');
+ assert.equal(blocked.payment_date,'2026-10-28');
+ assert.deepEqual(blocked.affected_payment_ids,[later]);
+ assert.deepEqual(issues.filter(i=>i.code==='receipt_split_missing').map(i=>i.payment_id),missing);
+ const conflict=issues.find(i=>i.code==='receipt_date_conflict');
+ assert.deepEqual([conflict.payment_id,conflict.payment_date,conflict.sign_date],[advance,'2026-11-10','2026-11-11']);
+ const team=state.commission.realtime_previews.find(row=>row.kind==='management');
+ const teamBlock=team.contract_issues.find(i=>i.code==='receipt_prior_incomplete');
+ assert.deepEqual([teamBlock.payment_id,teamBlock.responsible_id,teamBlock.affected_payment_ids],[prior,2,[later]]);
+ assert.equal(team.estimated_total,null);
+ assert.equal(team.rate_pending,true);
+ const html=commissions(state);
+ assert.match(html,new RegExp(`收款 #${prior} · 实收 .*实际到账 2026-10-28`));
+ assert.match(html,new RegExp(`受影响的后续流水 #${later}`));
+ assert.match(html,new RegExp(`data-task-key="${blocked.key}"`));
+
+ await post('/payments/'+undated+'/details',{amount:5000,status:'已到账',pay_date:'2026-11-03',reason:'核对原始到账'},'PATCH');
+ await post('/payments/'+prior+'/allocation',{product_amount:5000,reason:'核对历史分配'});
+ for(const id of missing)await post('/payments/'+id+'/allocation',{product_amount:0,reason:'核对本笔为服务款'});
+ const corrected=await read(),remaining=tasks(corrected);
+ assert.deepEqual(remaining.filter(i=>i.payment_id).map(i=>i.code),['receipt_date_conflict']);
+ const correctedTeam=corrected.commission.realtime_previews.find(row=>row.kind==='management');
+ assert.ok(correctedTeam.estimated_total>0);
+ assert.equal(correctedTeam.calculated_total,null);
+ assert.deepEqual(correctedTeam.contract_issues.filter(i=>i.payment_id).map(i=>i.code),['receipt_date_conflict']);
+ const before=state.contracts.find(c=>c.id===productContract),after=corrected.contracts.find(c=>c.id===productContract);
+ assert.equal(after.collected,before.collected);
+ assert.equal(after.payments.length,before.payments.length);
+ assert.ok(f.personal().lines.some(l=>l.contract_id===productContract&&l.base>0&&Number.isFinite(l.amount)));
+ assert.ok(f.personal().lines.some(l=>l.contract_id===mixedContract&&l.base>0&&Number.isFinite(l.amount)));
+});
 test('历史确认和发放只读保留，当前应计不扣历史',async t=>{
  const f=await setup(t),id=await f.create([product(100000,25000)]);await f.pay(id,100000);await f.grade();const preview=f.model().previews.find(p=>p.sales_id===2);const h=historicalCommission(f,preview,{paid:true});
  const before=one(f.db,'SELECT * FROM commission_batches WHERE id=?',h.body.id);const lines=all(f.db,'SELECT * FROM commission_lines');
@@ -59,12 +119,12 @@ test('旧算法合同排除可解释，不改写原批次且正常合同继续�
 test('停用成员有当期来源仍可读，无写入恢复启用状态',async t=>{
  const f=await setup(t),id=await f.create([product(100000,25000)]);await f.pay(id,100000);await f.grade();run(f.db,'UPDATE users SET active=0 WHERE id=2');const p=f.personal();assert.equal(p.active,false);assert.equal(p.total,250000);assert.equal(one(f.db,'SELECT active FROM users WHERE id=2').active,0);
 });
-test('管理者个人按销售月份，团队管理保留累计周期，开发者和PM不进入计提',async t=>{
- const f=await setup(t),rows=f.model().realtime_previews;assert.equal(rows.find(p=>p.sales_id===1&&p.kind==='personal').period,'2026-11');assert.equal(rows.find(p=>p.sales_id===1&&p.kind==='management').period,'2026Q4');assert.ok(rows.filter(p=>p.sales_id===2).every(p=>p.period==='2026-11'));assert.ok(rows.every(p=>['admin','sales'].includes(one(f.db,'SELECT role FROM users WHERE id=?',p.sales_id).role)));
+test('个人和团队管理按相同月份计算，开发者和PM不进入计提',async t=>{
+ const f=await setup(t),rows=f.model().realtime_previews;assert.equal(rows.find(p=>p.sales_id===1&&p.kind==='personal').period,'2026-11');assert.equal(rows.find(p=>p.sales_id===1&&p.kind==='management').period,'2026-11');assert.ok(rows.filter(p=>p.sales_id===2).every(p=>p.period==='2026-11'));assert.ok(rows.every(p=>['admin','sales'].includes(one(f.db,'SELECT role FROM users WHERE id=?',p.sales_id).role)));
  const s=(await f.request('/state?commissionPeriod=2026-11',{actor:f.sales})).body;assert.ok(selectCommissionRows(s,{owner:'1'}).every(p=>p.sales_id===2));
 });
 test('销售新增数据刷新不修改规则及历史，真实库结构版本保持35',async t=>{
- const f=await setup(t),before=one(f.db,"SELECT value FROM settings WHERE key='rules'").value;f.model();f.model();assert.equal(one(f.db,"SELECT value FROM settings WHERE key='rules'").value,before);assert.equal(one(f.db,'SELECT max(version) n FROM schema_version').n,35);
+ const f=await setup(t),before=one(f.db,"SELECT value FROM settings WHERE key='rules'").value;f.model();f.model();assert.equal(one(f.db,"SELECT value FROM settings WHERE key='rules'").value,before);assert.equal(one(f.db,'SELECT max(version) n FROM schema_version').n,36);
 });
 const model=()=>({actor:{id:1,role:'admin',name:'管理'},today:'2026-11-10',rules:{commission:{period:'quarter'}},users:[{id:1,role:'admin'},{id:2,role:'sales',name:'甲'},{id:3,role:'sales',name:'乙'}],contracts:[{id:10,name:'产品合同',contract_no:'HT-10',owner_id:2}],commission:{period:'2026-11',legacy_mode:'quarter',realtime_previews:[{sales_id:2,name:'甲',kind:'personal',period:'2026-11',estimated_total:10000,calculated_total:10000,lines:[{contract_id:10,contract_name:'产品合同',base:100000,rate:.1,entitlement:10000,amount:5,component:'product'}],contract_issues:[]},{sales_id:3,name:'乙',kind:'personal',period:'2026-11',estimated_total:null,calculated_total:null,lines:[],contract_issues:[{code:'rate_missing',message:'比例待核实',pending:true}]},{sales_id:1,name:'管理',kind:'management',period:'2026Q4',estimated_total:20000,lines:[]}],batches:[{id:1,sales_id:2,kind:'personal',period:'2026Q4',snapshot:{},amount:3000}]}});
 test('搜索合同定位完整人员金额，状态及导出共享筛选',()=>{const S=model(),P={commissionQ:'HT-10'};assert.equal(selectCommissionRows(S,P)[0].estimated_total,10000);assert.equal(buildCommissionExport(S,P).detailRows[1][9],100);assert.equal(buildCommissionExport(S,{commissionStatus:'pending'}).summaryRows.length,2);assert.equal(selectCommissionRows(S,{commissionQ:'不存在'}).length,0);});

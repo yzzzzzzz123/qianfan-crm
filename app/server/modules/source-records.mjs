@@ -31,19 +31,27 @@ export function readAttachment(ctx,id,actor) {
 }
 export function attachContractFile(ctx,contractId,file) {
   assertContractDataAccess(ctx.actor,ctx.scoped('contracts',contractId,ctx.actor));
+  return attachFile(ctx,'contract',contractId,file);
+}
+export function attachQuoteFile(ctx,quoteId,{name,base64}) {
+  sourceAccess(ctx,'quote',quoteId,ctx.actor);
+  return attachFile(ctx,'quote',quoteId,{name,base64});
+}
+function attachFile(ctx,entity,entityId,file) {
+  const label=entity==='quote'?'报价附件':'合同附件';
   const filename=file.name||file.filename;
   assert(typeof filename==='string'&&filename.length<=255&&!/[\\/\x00-\x1f]/.test(filename),'附件名无效');
   const content=file.content?Buffer.from(file.content):Buffer.from(file.base64||'','base64');
-  assert(content.length>0&&content.length<=60*1024*1024,'合同附件为空或超过60MB');
+  assert(content.length>0&&content.length<=60*1024*1024,label+'为空或超过60MB');
   const ext=filename.split('.').pop().toLowerCase();
   const types={pdf:'application/pdf',png:'image/png',jpg:'image/jpeg',jpeg:'image/jpeg',webp:'image/webp',docx:'application/vnd.openxmlformats-officedocument.wordprocessingml.document',xlsx:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',txt:'text/plain',md:'text/markdown'};
-  assert(types[ext],'合同附件格式不支持');
+  assert(Object.hasOwn(types,ext)&&(entity!=='quote'||!['txt','md'].includes(ext)),label+'格式不支持');
   if(ext==='pdf')assert(content.subarray(0,5).toString()==='%PDF-','PDF附件内容与文件类型不符');
   if(ext==='png')assert(content.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10])),'PNG附件内容与文件类型不符');
   if(['jpg','jpeg'].includes(ext))assert(content[0]===255&&content[1]===216&&content[2]===255,'JPEG附件内容与文件类型不符');
   if(ext==='webp')assert(content.subarray(0,4).toString()==='RIFF'&&content.subarray(8,12).toString()==='WEBP','WebP附件内容与文件类型不符');
   const sha256=createHash('sha256').update(content).digest('hex');
-  const existing=one(ctx.db,"SELECT id FROM attachments WHERE entity='contract' AND entity_id=? AND sha256=?",contractId,sha256);
+  const existing=one(ctx.db,'SELECT id FROM attachments WHERE entity=? AND entity_id=? AND sha256=?',entity,entityId,sha256);
   if(existing)return existing.id;
-  return ctx.insert('attachments',{entity:'contract',entity_id:contractId,filename,mime_type:types[ext],size:content.length,sha256,content,source_path:filename,created_at:now(),created_by:ctx.actor.id});
+  return ctx.insert('attachments',{entity,entity_id:entityId,filename,mime_type:types[ext],size:content.length,sha256,content,source_path:filename,created_at:now(),created_by:ctx.actor.id});
 }

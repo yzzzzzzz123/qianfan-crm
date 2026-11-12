@@ -23,7 +23,7 @@ test('商机总表按销售分组并固定阶段顺序，同客户多商机及�
   assert.deepEqual(groups.find(group=>group.owner_id==='2').rows.map(row=>row.id),[1,2,3,4,5,6,7,8,9]);
   assert.equal(groups.flatMap(group=>group.rows).length,10);
   assert.deepEqual(rows,original,'分组排序不能改写输入状态或历史阶段');
-  const html=opportunities(S,{owner:'3'});
+  const html=opportunities(S,{opportunityView:'ledger',owner:'3'});
   assert.equal(rowIds(html).length,10,'已撤销的负责人筛选不能隐藏其他销售');
   assert.equal(new Set(rowIds(html)).size,10);
   assert.match(html,/共 10 条商机 · 按销售小二分组/);
@@ -67,11 +67,11 @@ test('项目服务金额只在总额和cash都已知时计算，明确零有效�
 });
 
 test('总表展示九项要求字段并保留详情入口，跟进和推进信息仍只在其他表格显示',()=>{
-  const rows=[opportunity(1)],S=state(rows),html=opportunities(S,{});
+  const rows=[opportunity(1)],S=state(rows),html=opportunities(S,{opportunityView:'ledger'});
   const head=html.match(/<thead>(.*?)<\/thead>/s)[1];
   assert.equal((head.match(/<th /g)||[]).length,9);
-  for(const label of ['客户名称','售卖产品','商机阶段','合同金额','cash金额','项目 / 服务金额','销售小二','订单类型','创建时间'])assert.ok(clean(head).includes(label),label);
-  assert.doesNotMatch(html,/下一步|跟进时间|推进状态|stage-track/);
+  for(const label of ['客户名称','售卖产品','商机阶段','预计商机金额','预计产品金额','预计项目 / 服务金额','销售小二','订单类型','创建时间'])assert.ok(clean(head).includes(label),label);
+  assert.doesNotMatch(html.match(/<table[\s\S]*?<\/table>/)[0],/下一步|跟进时间|推进状态|stage-track/);
   assert.match(html,/2026\/11\/01 08:00:00/,'UTC创建时间按北京时间显示');
   assert.match(html,/data-action="opportunity" data-id="1"/);
   assert.match(html,/class="table-scroll opportunity-list-scroll" tabindex="0" role="region"/);
@@ -84,10 +84,10 @@ test('总表展示九项要求字段并保留详情入口，跟进和推进信�
 
 test('销售只渲染已授权状态中的商机，空数据和查询无结果保持可用',()=>{
   const rows=[opportunity(1)],S={...state(rows),actor:{id:2,name:'销售甲',role:'sales'}};
-  const html=opportunities(S,{owner:'3'});
+  const html=opportunities(S,{opportunityView:'ledger',owner:'3'});
   assert.deepEqual(rowIds(html),[1]);
   assert.doesNotMatch(html,/销售乙|全部负责人|id="filter-owner"/);
-  for(const result of [opportunities({...S,opportunities:[]},{}),opportunities(S,{q:'没有这个产品'})]) {
+  for(const result of [opportunities({...S,opportunities:[]},{opportunityView:'ledger'}),opportunities(S,{opportunityView:'ledger',q:'没有这个产品'})]) {
     assert.match(result,/没有匹配的商机/);
     assert.match(result,/共 0 条商机/);
     assert.doesNotMatch(result,/data-action="opportunity"|NaN|undefined/);
@@ -96,7 +96,7 @@ test('销售只渲染已授权状态中的商机，空数据和查询无结果�
 
 test('搜索、阶段与看板日期类型筛选继续生效且不按客户去重',()=>{
   const rows=[opportunity(1,{name:'同名产品'}),opportunity(2,{name:'同名产品',owner_id:3}),opportunity(3,{stage:'商务'}),opportunity(4,{created_at:'2026-09-01'}),opportunity(5,{sale_type:'续费'}),opportunity(6,{customer_id:11})],S=state(rows);
-  const html=opportunities(S,{owner:'2',q:'同名产品',stage:'需求',customerLevel:'A',saleType:'新签自建',from:'2026-11-01',to:'2026-11-02'});
+  const html=opportunities(S,{opportunityView:'ledger',owner:'2',q:'同名产品',stage:'需求',customerLevel:'A',saleType:'新签自建',from:'2026-11-01',to:'2026-11-02'});
   assert.deepEqual(rowIds(html),[1,2]);
   assert.match(html,/沿用看板筛选/);
   assert.match(html,/全部商机 <b>2<\/b>/);
@@ -105,7 +105,7 @@ test('搜索、阶段与看板日期类型筛选继续生效且不按客户去�
 test('产品、销售、客户和旧阶段中的HTML只显示文本',()=>{
   const row=opportunity(1,{name:'<img src=x>',stage:'<script>bad()</script>',order_type:'<b>类型</b>'}),S=state([row]);
   S.users.find(user=>user.id===2).name='<i>销售</i>';S.customers[0].name='<strong>客户</strong>';
-  const html=opportunities(S,{});
+  const html=opportunities(S,{opportunityView:'ledger'});
   assert.doesNotMatch(html,/<img src=x>|<script>bad|<i>销售|<strong>客户|<b>类型/);
   for(const text of ['&lt;img src=x&gt;','&lt;script&gt;bad()&lt;/script&gt;','&lt;i&gt;销售&lt;/i&gt;','&lt;strong&gt;客户&lt;/strong&gt;'])assert.ok(html.includes(text));
 });

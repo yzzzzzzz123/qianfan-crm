@@ -1,5 +1,6 @@
 import { esc, icon } from '../ui.js';
 import {presenceControl} from './developer-presence.js';
+import {bindCommittedSearch,isCompositionEvent} from './search-input.js';
 
 const roleName = role => ({admin:'管理员',sales:'销售',pm:'协作PM'}[role] || role);
 export function sessionControl(S) {
@@ -23,13 +24,14 @@ export function bindIdentityPicker() {
   if(!picker)return;
   const input=picker.querySelector('input');
   picker.addEventListener('toggle',()=>{if(picker.open)input.focus();});
-  input.addEventListener('input',()=>{
+  bindCommittedSearch(picker,'#developer-search',()=>{
     const query=input.value.trim().toLocaleLowerCase();
     const options=[...picker.querySelectorAll('[role=option]')];
     for(const option of options)option.hidden=!option.dataset.identityLabel.toLocaleLowerCase().includes(query);
     picker.querySelector('.developer-no-results').hidden=options.some(option=>!option.hidden);
   });
   picker.addEventListener('keydown',event=>{
+    if(isCompositionEvent(event))return;
     if(event.key==='Escape'){event.preventDefault();picker.open=false;picker.querySelector('summary').focus();return;}
     if(!['ArrowDown','ArrowUp','Home','End'].includes(event.key))return;
     const options=[...picker.querySelectorAll('[role=option]:not([hidden])')];

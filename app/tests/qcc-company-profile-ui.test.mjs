@@ -10,9 +10,9 @@ test('企业资料展示简介、产品、年度人数及来源日期，零人�
  assert.match(html,/data-action="refresh-company-profile"/);
 });
 
-test('未配置不展示查询状态，未披露年报不填默认人数，共享主档不泄露详情',()=>{
+test('未接入显示可理解的状态，未披露年报不填默认人数，共享主档不泄露详情',()=>{
  const value={id:1,company_profile:{state:'not_configured',can_refresh:false,details:{},reason:'尚未配置企查查MCP'}};
- assert.doesNotMatch(companyProfileDetails(value,true),/未接入|尚未配置/);assert.doesNotMatch(companyProfileDetails(value,true),/data-action="refresh-company-profile"/);
+ assert.match(companyProfileDetails(value,true),/企业资料未接入/);assert.match(companyProfileDetails(value,true),/可先手动维护客户档案/);assert.doesNotMatch(companyProfileDetails(value,true),/MCP|data-action="refresh-company-profile"/);
  assert.equal(companyProfileDetails({...value,shared:true},true),'');
  const ready=companyProfileDetails({id:1,company_profile:{state:'ready',details:{company_name:'仅有企业名称',annual_employees:null,annual_report_year:null}}});
  assert.match(ready,/年报从业人数<\/dt><dd>源接口未提供<\/dd>/);assert.match(ready,/年报年度<\/dt><dd>源接口未提供<\/dd>/);

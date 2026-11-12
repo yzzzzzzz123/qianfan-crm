@@ -4,7 +4,7 @@ const schema={
   contact:{path:'/contacts',table:'contacts',required:['customer_id','name'],fields:'customer_id name title phone role attitude wechat dingtalk last_contact note active'},
   opportunity:{path:'/opportunities',table:'opportunities',required:['customer_id','name','owner_id','stage','amount','product_amount','sale_type','order_type'],fields:'customer_id name owner_id stage amount product_amount sale_type order_type next_action follow_date expected_date lost_reason reason collaborator_pm'},
   activity:{path:'/activities',required:['opportunity_id','summary','activity_type','activity_date'],fields:'opportunity_id summary action activity_type source activity_date follow_date'},
-  quote:{path:'/quotes',required:['opportunity_id','valid_until','items'],fields:'opportunity_id items valid_until note'},
+  quote:{path:'/quotes',required:['opportunity_id','items'],fields:'opportunity_id items valid_until note'},
   contract:{path:'/contracts',table:'contracts',required:['name','sign_date','items'],fields:'opportunity_id customer_id name owner_id sign_date valid_until contract_no scope additional items sale_type order_type renewal_tag payment_type project_status collaborator_pm delivery_staff project_note reason'},
   contract_attachment:{path:'/contracts',suffix:'/attachments',required:['source_file'],fields:'contract_id source_file'},
   contract_archive:{path:'/contracts',suffix:'/archive',required:['both_stamped'],fields:'contract_id source_file both_stamped'},

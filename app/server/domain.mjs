@@ -1,4 +1,4 @@
-import {performancePolicy} from '../public/modules/performance-policy.js';
+import {processLedger} from './performance-ledger.mjs';
 export const SALE_TYPES = ['新签自建','新签分发','续费','增购'];
 export const ORDER_TYPES = ['代销','经销','千帆'];
 export const STAGES = [
@@ -132,32 +132,5 @@ export function processScore(
   month = period(),
   policy = {cap:50,meeting:0.5,visit:1,quote:0.5,process_weight:70},
 ) {
-  policy=performancePolicy(policy);
-  const own = opps.filter((o) => o.owner_id === userId);
-  const refs = new Set(own.map((o) => o.id));
-  const a = activities.filter(
-    (a) => refs.has(a.opportunity_id) && (a.user_id === undefined || a.user_id === userId) && a.activity_date.startsWith(month),
-  );
-  const newOpp = own.filter((o) => o.created_at.slice(0, 7) === month);
-  const meeting = a.filter((a) => a.activity_type === "线上会议").length;
-  const visit = a.filter((a) => a.activity_type === "现场拜访").length;
-  const quoteRecords = quotes.filter(
-    (q) => q.user_id === userId && q.created_at.startsWith(month),
-  );
-  const quoteDays=new Set(quoteRecords.map(q=>`${q.opportunity_id}:${q.created_at.slice(0,10)}`));
-  const quoteEvents=new Set(a.filter(a=>a.activity_type==='对客报价'&&!quoteDays.has(`${a.opportunity_id}:${a.activity_date}`)).map(a=>`${a.opportunity_id}:${a.activity_date}`));
-  const quote = quoteRecords.length+quoteEvents.size;
-  const funnel = newOpp.reduce(
-    (s, o) => s + ((o.initial_amount ?? o.amount) < 980000 ? policy.funnel_low : (o.initial_amount ?? o.amount) <= 5000000 ? policy.funnel_mid : policy.funnel_high),
-    0,
-  );
-  const raw = Math.round(Math.min(policy.cap, meeting * policy.meeting + visit * policy.visit + quote * policy.quote + funnel)*100)/100;
-  return {
-    meeting,
-    visit,
-    quote,
-    funnelCount: newOpp.length,
-    raw,
-    weighted: Math.round((raw / policy.cap) * policy.process_weight * 100) / 100,
-  };
+  return processLedger(opps,activities,quotes,userId,month,policy).process;
 }
