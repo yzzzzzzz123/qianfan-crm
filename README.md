@@ -31,7 +31,6 @@ npm run demo
 | `local/` | Windows 服务管理、私密配置读取及本地开发工具 |
 | `deploy/` | Linux 服务入口、systemd、Nginx、备份及远程 SQLite 工具 |
 | `skill/sync-local-to-server/` | 发布计划、业务数据合并工具及目标配置模板 |
-| `app/sites/qianfan-crm-trial-20261023/` | 独立静态试用工程的源码 |
 
 业务主链路为客户与联系人 → 商机 → 跟进与报价 → 合同及行项 → 回款。权限、来源记录、事务、幂等与审计贯穿业务写入。企业资料、AI 文档接收和听记需要各自配置对应接口。
 
@@ -58,10 +57,8 @@ npm run test:module -- contracts
 npm run build:widgets
 ```
 
-独立静态试用工程有自己的 `package.json` 和构建说明，其数据保存在浏览器中。
-
 ## 部署与数据
 
 Linux 部署参考 `deploy/` 中的服务入口、systemd 与 Nginx 模板。运行目录和域名应按实际环境配置，真实密钥在服务器单独提供。发布升级从目标环境自身最新备份迁移并保留业务数据；本地开发和隔离测试不自动运行正式同步、通知或外发任务。
 
-第三方组件声明见 `app/widgets/THIRD_PARTY_NOTICES.txt` 及静态试用工程相应说明。
+第三方组件声明见 `app/widgets/THIRD_PARTY_NOTICES.txt`。

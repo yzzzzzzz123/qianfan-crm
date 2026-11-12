@@ -1,1 +1,0 @@
-{"name":"qianfan-crm-browser-trial","private":true,"type":"module","scripts":{"build":"node build.mjs"},"dependencies":{"@noble/hashes":"2.0.1","buffer":"6.0.3","esbuild":"0.25.11","sql.js":"1.13.0"}}
