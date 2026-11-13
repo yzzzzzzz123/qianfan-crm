@@ -118,8 +118,11 @@ test('非业务管理员可用本人验证测试卡片，不改变成员归属�
 
 test('卡片适配器传真实 @ 参数及整数分金额，不输出凭据',async()=>{
   const requests=[];const sender=createWinReportSender({env:{DINGTALK_CLIENT_ID:'app',DINGTALK_CLIENT_SECRET:'private-secret'},fetcher:async(url,options)=>{requests.push({url,options});return new Response(JSON.stringify(url.endsWith('accessToken')?{accessToken:'private-token',expireIn:7200}:{success:true,result:{outTrackId:'track-1',deliverResults:[{spaceType:'IM_GROUP',spaceId:'cid-group',success:true}]}}),{status:200});}});
-  await sender.send({template_id:'template.schema',out_track_id:'track-1',conversation_id:'cid-group',robot_code:'robot'},{owner_name:'王宏',ding_user_id:'verified-owner',customer_name:'测试客户',sales_content:'产品',contract_no:'HT1',amount:12345,sign_date:'2026-11-13',won_at:'now'});
-  const payload=JSON.parse(requests[1].options.body);assert.equal(payload.cardData.cardParamMap.amount,'123.45');assert.deepEqual(payload.imGroupOpenDeliverModel.atUserIds,{'verified-owner':'王宏'});assert.equal(payload.openSpaceId,'dtv1.card//IM_GROUP.cid-group');assert.doesNotMatch(requests[1].options.body,/private-secret|private-token/);
+  await sender.send({template_id:'template.schema',out_track_id:'track-1',conversation_id:'cid-group',robot_code:'robot'},{owner_name:'王宏',ding_user_id:'verified-owner',customer_name:'测试客户',sales_content:'产品',contract_no:'HT1',amount:123456,sign_date:'2026-11-13',won_at:'now'});
+  const payload=JSON.parse(requests[1].options.body),fields=payload.cardData.cardParamMap;
+  assert.equal(fields.title,'恭喜成单');assert.equal(fields.amount,'1234.56');
+  assert.equal(fields.amount_text,'恭喜 <font colorTokenV2=common_blue1_color>@王宏</font>');assert.equal(fields.owner_text,'销售内容：产品');assert.equal(fields.customer_text,'销售金额：¥1,234.56');assert.equal(fields.sales_text,'笃行致远，终有收获，再接再厉！');assert.equal(fields.contract_text,'');assert.equal(fields.date_text,'');
+  assert.deepEqual(payload.imGroupOpenDeliverModel.atUserIds,{'verified-owner':'王宏'});assert.equal(payload.openSpaceId,'dtv1.card//IM_GROUP.cid-group');assert.doesNotMatch(requests[1].options.body,/private-secret|private-token/);
 });
 
 test('HTTP成功但目标群投放失败不能显示发送成功，独立凭证不得混用',async()=>{
@@ -152,7 +155,7 @@ test('交付模板字段与发送适配器一致，模板不包含交互回调�
   // Match the actual message-card export, including its nested serialized editor document.
   assert.equal(template.type,'im');assert.equal(template.mode,'card');assert.equal(editor.schemaVersion,'3.0.0');
   const root=editor.schema.componentsTree[0];assert.equal(root.componentName,'Card');
-  assert.match(editor.mockData.cardData.amount_text,/100\.00\n签约金额/);
+  assert.match(editor.mockData.cardData.amount_text,/@示例负责人/);assert.equal(editor.mockData.cardData.customer_text,'销售金额：¥100.00');
   const components=[root,...root.children],ids=components.map(n=>n.id);
   assert.equal(new Set(ids).size,ids.length);
   for(const n of components){assert.ok(editor.schema.componentsMap.some(c=>c.componentName===n.componentName));assert.ok(template.widgetInfo.includes(`userId="${n.id}"`));}

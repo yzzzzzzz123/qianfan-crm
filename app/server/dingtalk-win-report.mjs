@@ -25,8 +25,10 @@ export function createWinReportSender({env=process.env,fetcher=fetch}={}){
       if(!snapshot.ding_user_id)throw deliveryError('商机负责人缺少已核验的钉钉身份，无法发送 @ 提醒',{code:'OWNER_IDENTITY_MISSING'});
       const md=value=>String(value??'').replace(/[\r\n]+/g,' ').replace(/[\\`*_{}\[\]()#+.!|<>]/g,'\\$&');
       const amount=(snapshot.amount/100).toFixed(2);
+      const displayAmount=new Intl.NumberFormat('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}).format(snapshot.amount/100);
+      // Keep the published template's ordered slots; genuine @ delivery still uses atUserIds below.
       const cardParamMap={title:snapshot.test?'【测试】恭喜成单':'恭喜成单',owner_name:snapshot.owner_name,customer_name:snapshot.customer_name,sales_content:snapshot.sales_content,contract_no:snapshot.contract_no,amount,sign_date:snapshot.sign_date,won_at:snapshot.won_at,
-        amount_text:`## ¥${amount}\n签约金额`,owner_text:`**负责人**　${md(snapshot.owner_name)}`,customer_text:`**客户**　${md(snapshot.customer_name)}`,sales_text:`**销售内容**　${md(snapshot.sales_content)}`,contract_text:`**合同编号**　${md(snapshot.contract_no)}`,date_text:`**签约日期**　${md(snapshot.sign_date)}`};
+        amount_text:`恭喜 <font colorTokenV2=common_blue1_color>@${md(snapshot.owner_name)}</font>`,owner_text:`销售内容：${md(snapshot.sales_content)}`,customer_text:`销售金额：¥${displayAmount}`,sales_text:'笃行致远，终有收获，再接再厉！',contract_text:'',date_text:''};
       const body={cardTemplateId:delivery.template_id,outTrackId:delivery.out_track_id,openSpaceId:`dtv1.card//IM_GROUP.${delivery.conversation_id}`,cardData:{cardParamMap},imGroupOpenSpaceModel:{supportForward:false},imGroupOpenDeliverModel:{robotCode:delivery.robot_code,atUserIds:{[snapshot.ding_user_id]:snapshot.owner_name}}};
       const existing=delivery.card_created===1;
       const payload=existing?{outTrackId:body.outTrackId,openSpaceId:body.openSpaceId,imGroupOpenDeliverModel:body.imGroupOpenDeliverModel}:body;
