@@ -24,6 +24,7 @@ export function createApp({
   companyProfileProvider,
   companyProfileLocalAutomation,
   minutesOptions,
+  winReportOptions,
   deployment='local',
   localIdentitySwitch = false,
   developerIdentitySwitch = localIdentitySwitch,
@@ -50,7 +51,7 @@ export function createApp({
   }
   if (demo) seedDemo(db);
   if(!/^\/(?:[a-zA-Z0-9_-]+\/)*$/.test(basePath)){db.close();throw new Error('访问路径须为以斜线开头和结尾的固定路径');}
-  const service = createService(db, { demo, secure, publicOrigin, identityProvider, aiProvider, salesAdviceProvider, companyProfileProvider, companyProfileLocalAutomation, minutesOptions, deployment, developerIdentitySwitch, basePath });
+  const service = createService(db, { demo, secure, publicOrigin, identityProvider, aiProvider, salesAdviceProvider, companyProfileProvider, companyProfileLocalAutomation, minutesOptions, winReportOptions, deployment, developerIdentitySwitch, basePath });
   const server = http.createServer(async (req, res) => {
     const headers = {
       "X-Content-Type-Options": "nosniff",
@@ -143,6 +144,8 @@ export function createApp({
   const stopMinutes=service.minutes.startScheduler();server.once('close',()=>{stopMinutes();void service.minutes.shutdown();});
   const stopCompanyProfiles=service.companyProfileQueue.startScheduler();
   server.once('close',()=>{stopCompanyProfiles();});
+  const stopWinReports=service.winReports.startScheduler();
+  server.once('close',()=>{stopWinReports();});
   return { server, db, service };
 }
 if (
@@ -187,6 +190,7 @@ export function start({companyProfileLocalAutomation}={}) {
       app.server.close(async () => {
         await app.service.minutes.shutdown();
         await app.service.companyProfileQueue.shutdown();
+        await app.service.winReports.shutdown();
         app.db.close();
         process.exit(0);
       }),

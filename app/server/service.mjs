@@ -31,15 +31,17 @@ import {createCompanyProfileWorker} from './company-profile-worker.mjs';
 import {createSalesAdviceAI,salesAdviceSnapshot,salesAdviceResponse} from './sales-advice.mjs';
 import {createContractAnalysis} from './contract-analysis.mjs';
 import {readContractHistory} from './modules/contract-history.mjs';
+import {createWinReports,handleWinReports} from './win-reports.mjs';
 
 const sha = (s) => createHash("sha256").update(s).digest("hex");
 export function createService(
   db,
-  { demo = false, secure = false, publicOrigin = "", identityProvider, aiProvider, salesAdviceProvider, companyProfileProvider, companyProfileLocalAutomation, minutesOptions={}, deployment='local', localIdentitySwitch = false, developerIdentitySwitch = localIdentitySwitch, basePath = '/' } = {},
+  { demo = false, secure = false, publicOrigin = "", identityProvider, aiProvider, salesAdviceProvider, companyProfileProvider, companyProfileLocalAutomation, minutesOptions={}, winReportOptions={}, deployment='local', localIdentitySwitch = false, developerIdentitySwitch = localIdentitySwitch, basePath = '/' } = {},
 ) {
   const auth = createAuth(db, { demo, secure, basePath });
   const presence = createPresence(db);
   const ding = identityProvider || createDingTalk({secure,basePath});
+  const winReports=createWinReports({db,env:demo?{}:process.env,...winReportOptions,deployment});
   const ai = aiProvider || createIntakeAI();
   const salesAI=salesAdviceProvider||createSalesAdviceAI({env:demo?{}:process.env});
   const adviceCache=new Map(),pendingAdvice=new Set(),pendingProfile=new Set();
@@ -116,9 +118,14 @@ export function createService(
     value.company_profiles=actor.role==='admin'?queueSummary():{configured:!!companyProvider.configured,automatic:profileWorker.automatic};
     value.contracts=value.contracts.map(c=>({...c,...(actor.role!=='pm'?{contract_analysis:contractAnalysis.describe(c.id,actor)}:{})}));
     value.ai.salesAdvice={configured:!!salesAI.configured,model:salesAI.model||'deepseek-v4-1-flash'};
+    if(actor.role==='admin'){
+      value.win_reports=winReports.summary();
+      value.opportunities=value.opportunities.map(o=>({...o,win_report:winReports.describe(o.id)}));
+    }
     return value;
   };
   const handlers = [
+    handleWinReports,
     handleDataReview,
     handleContractExpenses,
     handleAdminRecords,
@@ -155,6 +162,7 @@ export function createService(
       mutate,
       state,
       companyProfiles,
+      winReports,
     };
     for (const handleModule of handlers) {
       const result = handleModule(context);
@@ -426,6 +434,7 @@ export function createService(
     });
     body.afterCommit?.();delete body.afterCommit;
     if(!replayed){
+      void winReports.kick();
       const customerIds=path==='/api/customers'&&method==='POST'?[body.id]:(Array.isArray(body.result)?body.result:[]).filter(r=>r.type==='customer'&&r.action==='create').map(r=>r.id);
       if(profileWorker.automatic){
         for(const id of new Set(customerIds))profileQueue.enqueueCustomer(id,{priority:100});
@@ -456,7 +465,7 @@ export function createService(
     }
     return { body };
   }
-  return { handle, state, minutes, companyProfileQueue };
+  return { handle, state, minutes, companyProfileQueue, winReports };
   function allUsers() {return db.prepare("SELECT id,name,role,active FROM users WHERE active=1 AND business_member=1 AND developer_admin=0 ORDER BY CASE role WHEN 'admin' THEN 0 WHEN 'sales' THEN 1 ELSE 2 END,name,id").all();}
   function businessUser(id) {return one(db,'SELECT * FROM users WHERE id=? AND active=1 AND business_member=1 AND developer_admin=0',id);}
   function defaultBusinessUser() {

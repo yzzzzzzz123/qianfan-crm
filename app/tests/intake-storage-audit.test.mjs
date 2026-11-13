@@ -9,7 +9,7 @@ test('真实库字段审计区分物理表、AI字段和系统列，读取不修
   const db=openDatabase(':memory:');
   try {
     const before=db.prepare('SELECT total_changes() n').get().n,report=auditIntakeStorage(db);
-    assert.equal(report.ok,true,JSON.stringify(report.problems));assert.equal(report.table_count,41);
+    assert.equal(report.ok,true,JSON.stringify(report.problems));assert.equal(report.table_count,43);
     for(const name of ['customer_profiles','contract_attachment_analyses','company_profile_jobs','company_profile_queue_control']){
       const table=report.tables.find(t=>t.name===name);assert.ok(table,name);
       assert.deepEqual(table.ai_mapped_columns,[]);assert.deepEqual(table.not_directly_written_by_ai,table.columns);

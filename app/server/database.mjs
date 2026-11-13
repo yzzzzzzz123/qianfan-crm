@@ -30,6 +30,7 @@ import {migrateNetProfit} from './net-profit-schema.mjs';
 import {migrateProfitAdmin} from './profit-schema.mjs';
 import {migrateCollectionLedger} from './collection-ledger-schema.mjs';
 import {migrateActivityCorrections} from './activity-correction-schema.mjs';
+import {migrateWinReports} from './win-report-schema.mjs';
 
 export function openDatabase(filename) {
   if (filename !== ":memory:")
@@ -129,6 +130,7 @@ export function openDatabase(filename) {
   migrateNetProfit(db);
   migrateContractExpenses(db);
   migrateActivityCorrections(db);
+  migrateWinReports(db);
   return db;
   } catch(error) {db.close();throw error;}
 }

@@ -58,7 +58,11 @@ function syncSignedContract(context,contract,{filing=false}={}){
     assert(opportunity.stage!=='输单','输单商机须核对恢复后再登记已签署合同',409);
     const total=one(db,"SELECT SUM(amount) total FROM contracts WHERE retired_at IS NULL AND opportunity_id=? AND lifecycle!='草稿'",opportunity.id).total;
     assert(opportunity.product_amount===null||opportunity.product_amount<=total,'已签署合同总额低于商机产品金额，请先核对金额');
-    if(opportunity.stage!=='赢单')insert('stage_history',{opportunity_id:opportunity.id,from_stage:opportunity.stage,to_stage:'赢单',at});
+    if(opportunity.stage!=='赢单'){
+      const firstWin=!one(db,"SELECT 1 FROM stage_history WHERE opportunity_id=? AND to_stage='赢单'",opportunity.id);
+      insert('stage_history',{opportunity_id:opportunity.id,from_stage:opportunity.stage,to_stage:'赢单',at});
+      if(firstWin)context.winReports?.recordWin(opportunity,contract,total,at);
+    }
     update('opportunities',opportunity.id,{stage:'赢单',amount:total,next_action:'跟进合同履约、验收与回款节点',follow_date:null,stage_at:opportunity.stage==='赢单'?opportunity.stage_at:at,updated_at:at});
     insert('activities',{opportunity_id:opportunity.id,user_id:actor.id,source:'系统里程碑',activity_type:'系统',summary:`${filing?'已确认签署合同':'已登记签署合同'} ${contract.contract_no||code('HT',contract.id,contract.created_at)}`,action:'明确交付与回款节点',activity_date:today(),created_at:at});
   }

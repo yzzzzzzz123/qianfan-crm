@@ -10,6 +10,7 @@ export async function fixture(t, options = {}) {
   const base = `http://127.0.0.1:${app.server.address().port}`;
   t.after(async () => {
     await app.service.minutes.shutdown();
+    await app.service.winReports.shutdown();
     await new Promise((r) => app.server.close(r));
     app.db.close();
   });

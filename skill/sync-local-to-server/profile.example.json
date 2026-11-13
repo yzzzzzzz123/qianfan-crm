@@ -14,6 +14,7 @@
     "app/scripts": "app/scripts",
     "app/tests": "app/tests",
     "app/widgets": "app/widgets",
+    "app/integrations": "app/integrations",
     "deploy": "deploy"
   },
   "files": [

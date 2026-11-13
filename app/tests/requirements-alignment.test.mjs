@@ -90,7 +90,7 @@ test('REQ-07 删除恢复实收保留核销关系，恢复预览在本人范围�
  assert.equal(one(f.db,'SELECT count(*) n FROM payment_plan_links WHERE receipt_id=?',paid.body.id).n,1);
  assert.equal(one(f.db,"SELECT SUM(amount) amount FROM payments WHERE contract_id=? AND status='已到账'",id).amount,300000);
 });
-test('REQ-11 结构36与数据库完整性，重复迁移无破坏',async t=>{
- const f=await setup(t);assert.equal(one(f.db,'SELECT MAX(version) v FROM schema_version').v,36);
+test('REQ-11 结构37与数据库完整性，重复迁移无破坏',async t=>{
+ const f=await setup(t);assert.equal(one(f.db,'SELECT MAX(version) v FROM schema_version').v,37);
  assert.equal(one(f.db,'PRAGMA integrity_check').integrity_check,'ok');assert.deepEqual(all(f.db,'PRAGMA foreign_key_check'),[]);
 });

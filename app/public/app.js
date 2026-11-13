@@ -34,6 +34,7 @@ import {teamExportRows,teamMetricDetail} from './modules/team-management.js';
 import {syncPerformanceReviewPreview,performanceQuoteDetail,selectPerformanceRows} from './modules/incentives.js';
 import {createMinutesController} from './modules/minutes.js';
 import {companyProfileFeedback} from './modules/customers.js';
+import {winReportRetryForm} from './modules/win-reports.js';
 import {salesPolicyFromForm} from './modules/commission-policy.js';
 import {shiftCommissionPeriod,currentCommissionPeriod} from './modules/commission-period.js';
 import {buildCommissionExport,commissionIssueRows} from './modules/commission-view-model.js';
@@ -612,6 +613,7 @@ document.addEventListener("click", async (e) => {
       if(more){more.open=false;more.querySelector('summary').focus({preventScroll:true});}
       openForm(action,id);return;
     }
+    if(action==='win-report-retry'){openHtml(winReportRetryForm(S,el.dataset.opportunityId,id));return;}
     if(action==='opportunity-view'){getP().opportunityView=id;getP().risk='';getP().sort='';if(id==='ledger')getP().owner='';content();return;}
     if(action==='customer-transfer-refresh'){await refreshCustomerTransfer(el.closest('form'));return;}
     if(action==='customer-scope'){getP().customerScope=id;getP().owner='';content();return;}
@@ -866,6 +868,11 @@ document.addEventListener("submit", async (e) => {
       method = "POST",
       body = b;
     let returnTo = formReturn;
+    if(type==='win-report-retry'){
+      path=`/opportunities/${Number(b.opportunity_id)}/win-report/${id}/retry`;
+      body={confirmed_not_delivered:b.confirmed_not_delivered==='on'};
+      returnTo={type:'opportunity',id:Number(b.opportunity_id)};
+    }
     if (type === "customer") path = "/customers";
     if(type==='customer')body.duplicate_ack=b.duplicate_ack==='on';
     if (type === "edit-customer") {

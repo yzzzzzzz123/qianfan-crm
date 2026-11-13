@@ -35,12 +35,12 @@ test('报价汇总逐行舍入再累计，不读取过时行缓存或把未知�
   assert.deepEqual(deriveQuoteTotals([{list_price:100,quantity:1,discount_rate:0}]),{list_amount:100,discount_amount:100});
 });
 
-test('当前结构为41表400列，报价创建不存重复列而状态仍返回计算结果',async t=>{
+test('当前结构为43表425列，报价创建不存重复列而状态仍返回计算结果',async t=>{
   const f=await fixture(t),actor=await f.login(1);
-  assert.equal(one(f.db,'SELECT MAX(version) version FROM schema_version').version,36);
+  assert.equal(one(f.db,'SELECT MAX(version) version FROM schema_version').version,37);
   const tables=all(f.db,"SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'");
-  assert.equal(tables.length,41);
-  assert.equal(tables.reduce((sum,{name})=>sum+all(f.db,`PRAGMA table_info(${name})`).length,0),400);
+  assert.equal(tables.length,43);
+  assert.equal(tables.reduce((sum,{name})=>sum+all(f.db,`PRAGMA table_info(${name})`).length,0),425);
   for(const name of ['customer_profiles','contract_attachment_analyses','company_profile_jobs','company_profile_queue_control'])assert.ok(tables.some(table=>table.name===name),name);
   assert.equal(one(f.db,'SELECT COUNT(*) n FROM company_profile_jobs').n,one(f.db,'SELECT COUNT(*) n FROM customers').n,'客户查询任务唯一且覆盖已有客户');
   assert.equal(one(f.db,'SELECT COUNT(*) n FROM customer_profiles').n,0,'仅建立任务，不猜造企业资料');

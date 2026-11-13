@@ -1,5 +1,7 @@
 // Business meaning only. Physical columns are always inspected from the live database.
 export const tablePurposes={
+  win_report_events:'商机首次赢单或显式测试的成单战报内容快照，不扫描补发历史赢单',
+  win_report_deliveries:'每次战报在指定群的独立投放状态、有限重试与不确定结果核对记录，不包含应用密钥',
   contract_expenses:'按合同明细逐笔登记的合同费用支出、收款方及可选凭证；合计回写明细费用并仅扣减一次毛利',
   record_recycle_bin:'管理员删除回款或附件的可恢复原始快照及核销关系、原因和操作者',
   payment_plan_links:'实际到账与收款计划的逐笔核销关系；不重复计入现金，部分核销保留余款',contract_exit_requests:'生效合同终止申请、操作人核对结果与保留账务的处理依据',
@@ -26,6 +28,8 @@ export const commonColumnPurposes={
   key:'配置或幂等记录的唯一键',version:'版本号',
 };
 export const columnPurposes={
+  win_report_events:{event_key:'首次赢单的稳定业务去重键，测试事件独立编号',kind:'won首次赢单或test显式测试卡片',snapshot:'首次赢单时负责人、钉钉身份、客户、销售内容及签约金额的不可变快照'},
+  win_report_deliveries:{event_id:'共享同一份内容快照的战报事件',group_key:'明确获准接入的目标群标识',group_name:'本次投放时的目标群名称',conversation_id:'本次投放时已核对的openConversationId',robot_code:'本次发送所用企业机器人编码',template_id:'本次发送使用的已发布卡片模板编号',out_track_id:'重试仍沿用的唯一卡片实例标识',card_created:'已取得创建回执的实例，重试直接投放已有实例而不重复创建',attempts:'本群独立累计投放次数',error_code:'脱敏错误类别',error_message:'不包含凭据或上游原文的固定处理提示',next_retry_at:'本群允许再次投放的时间',lease_until:'发送中的保守超时界限，过期转为待核对',sent_at:'钉钉确认投放成功的时间'},
   contract_expenses:{item_id:'所属合同明细编号',amount:'本笔合同费用支出，整数分，正金额',description:'本笔费用事由',incurred_on:'实际发生日期，可空，不能猜补历史日期',payee:'费用收款方，选填',reference_no:'费用凭证号，选填',attachment_id:'本合同已有凭证附件，选填',entry_kind:'detail为已逐笔核对费用；aggregate为历史或合计字段同步的待补明细记录',created_by:'登记费用的管理员，历史合计同步记录可空',created_at:'费用记录建立时间',updated_at:'最后一次费用维护时间',deleted_at:'移入回收站时间，NULL为有效费用',delete_reason:'移除费用的明确原因'},
   record_recycle_bin:{record_id:'删除前原记录编号，恢复时不覆盖其他记录',payload:'仅后端可读的原行与核销关系JSON快照',deleted_by:'执行删除的管理员编号',deleted_at:'移入回收站时间',restored_at:'成功恢复时间，未恢复为NULL'},
   payment_plan_links:{plan_id:'原收款计划编号',receipt_id:'本次核销所使用的实际到账编号',created_by:'明确执行本次核销的管理员'},
