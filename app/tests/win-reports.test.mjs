@@ -156,13 +156,14 @@ test('交付模板字段与发送适配器一致，模板不包含交互回调�
   assert.equal(template.type,'im');assert.equal(template.mode,'card');assert.equal(editor.schemaVersion,'3.0.0');
   const root=editor.schema.componentsTree[0];assert.equal(root.componentName,'Card');
   assert.match(editor.mockData.cardData.amount_text,/@示例负责人/);assert.equal(editor.mockData.cardData.customer_text,'销售金额：¥100.00');
-  const components=[root,...root.children],ids=components.map(n=>n.id);
+  const walk=n=>[n,...(n.children||[]).flatMap(walk)];
+  const components=walk(root),ids=components.map(n=>n.id);
   assert.equal(new Set(ids).size,ids.length);
   for(const n of components){assert.ok(editor.schema.componentsMap.some(c=>c.componentName===n.componentName));assert.ok(template.widgetInfo.includes(`userId="${n.id}"`));}
   for(const variable of editor.variableList){
     assert.ok(template.widgetInfo.includes(`data.cardData.${variable.name}`),`${variable.name} must also render in native XML`);
     if(variable.type==='markdown'){
-      const bound=root.children.find(n=>n.props?.content?.variable===variable.name);assert.equal(bound?.componentName,'Markdown');
+      const bound=components.find(n=>n.props?.content?.variable===variable.name);assert.equal(bound?.componentName,'Markdown');
       assert.equal(editor.mockData.richTextData.cardData[variable.name].version,'1.1');assert.ok(editor.mockData.richTextData.cardData[variable.name].items.length);
     }
   }
