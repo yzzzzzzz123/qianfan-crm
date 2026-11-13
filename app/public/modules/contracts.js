@@ -10,7 +10,15 @@ const collectBadge=c=>badge(collectionStatus(c),['已结清','完全回款'].inc
 export function contracts(S,P) { return contractList(S,P); }
 export function contractDetail(S,id,options={}) {const c=S.contracts.find(c=>c.id===Number(id));return c?contractWorkspace(S,c,options):empty('合同不存在');}
 export function contractItemRow(S,index,initial={}) {
-  return `<div class="item-row" data-item="${index}"><label class="field">内容<input data-field="name" required value="${esc(initial.name||'')}"></label><label class="field">类型<select data-field="kind" required><option value="">请选择</option>${contractItemKinds.map(k=>`<option ${k===initial.kind?'selected':''}>${k}</option>`).join('')}</select></label><label class="field">金额（元）<input type="number" data-field="amount" required min="0.01" step="0.01" value="${esc(initial.amount??'')}"></label>${profitEditor(initial,'yuan')}<button type="button" class="icon-btn" data-action="remove-item" aria-label="移除此明细">${icon('close')}</button></div>`;
+  return `<div class="item-row" data-item="${index}">
+    <div class="contract-line-fields">
+      <label class="field">内容<input data-field="name" required value="${esc(initial.name||'')}"></label>
+      <label class="field">类型<select data-field="kind" required><option value="">请选择</option>${contractItemKinds.map(k=>`<option ${k===initial.kind?'selected':''}>${k}</option>`).join('')}</select></label>
+      <label class="field">金额（元）<input type="number" data-field="amount" required min="0.01" step="0.01" value="${esc(initial.amount??'')}"></label>
+      <button type="button" class="icon-btn" data-action="remove-item" aria-label="移除此明细">${icon('close')}</button>
+    </div>
+    <details class="contract-line-profit"><summary>毛利与费用 <span data-profit-compact>待填写</span></summary>${profitEditor(initial,'yuan')}</details>
+  </div>`;
 }
 function conversionItems(S,o) {
   const amount=Object.hasOwn(o,'forecast_amount')?o.forecast_amount:o.amount;
@@ -66,11 +74,16 @@ export function formContracts(S,type,id,options) {
     const sellers=S.users.filter(u=>u.active&&u.role!=='pm'&&u.business_member!==0&&!u.developer_admin);
     const ownerId=sellers.some(u=>u.id===o?.owner_id)?o.owner_id:'';
     const saleType=o?select('sale_type','销售类型',[['','待补充'],'新签自建','新签分发','续费','增购'],o.sale_type||''):'';
-    return formShell('新增合同','保存后按已签署合同登记，签章附件可后补。',
+    const ownerField=S.actor.role==='admin'?select('owner_id','销售小二',[['',o?`沿用商机销售（${salesName(S,o)}）`:'沿用客户销售'],...sellers.map(u=>[u.id,u.name])],ownerId):'';
+    const orderType=select('order_type','订单类型',[['','待补充'],'代销','经销','千帆'],o?.order_type||'');
+    const extraFields=saleType+pmField+select('renewal_tag','产品续费标签',[['','待补充'],...renewalTags],'')+
+      select('payment_type','付款类型',[['','待补充'],...paymentTypes],'')+input('valid_until','产品到期日','','date',false)+textarea('scope','交付范围');
+    return formShell('新增合同','保存即登记签署，签章附件可后补。',
       (o?context:select('customer_id','关联客户',[['','请选择客户'],...customerOptions],'','required'))+
-      (S.actor.role==='admin'?select('owner_id','销售小二',[['',o?`沿用商机销售（${salesName(S,o)}）`:'沿用客户销售'],...sellers.map(u=>[u.id,u.name])],ownerId):'')+
-      input('name','合同名称',o?.name||'')+saleType+select('order_type','订单类型',[['','待补充'],'代销','经销','千帆'],o?.order_type||'')+pmField+
-      select('renewal_tag','产品续费标签',[['','待补充'],...renewalTags],'')+select('payment_type','付款类型',[['','待补充'],...paymentTypes],'')+input('contract_no','合同编号','','text',false)+input('sign_date',o?'实际签约日期':'签约日期',o?'':S.today,'date')+input('valid_until','产品到期日','','date',false)+textarea('scope','交付范围')+
-      `<div class="wide items-editor"><div class="section-head"><h3>合同明细</h3><button type="button" class="btn ghost" data-action="add-item">${icon('plus')}添加明细</button></div>${hint?`<p class="field-help">${esc(hint)}</p>`:''}<div id="contract-items">${rows.map((row,index)=>contractItemRow(S,index,row)).join('')}</div><output class="wide workflow-notice" data-profit-contract-preview>填写明细后查看合同金额、合同费用支出和扣费后毛利。</output></div>`,type,id,'保存合同');
+      input('name','合同名称',o?.name||'')+input('sign_date',o?'实际签约日期':'签约日期',o?'':S.today,'date')+
+      ownerField+orderType+input('contract_no','合同编号','','text',false)+
+      `<div class="wide items-editor"><div class="section-head"><h3>合同明细</h3><button type="button" class="btn secondary" data-action="add-item">${icon('plus')}添加明细</button></div>${hint?`<p class="field-help">${esc(hint)}</p>`:''}<div id="contract-items">${rows.map((row,index)=>contractItemRow(S,index,row)).join('')}</div></div>
+      <details class="wide contract-create-extra"><summary>签约与交付补充信息</summary><div class="contract-extra-fields">${extraFields}</div></details>`,
+      type,id,'保存合同',{className:'contract-create-form',footerSummary:'<output class="contract-create-totals" data-profit-contract-preview>填写明细后显示合同金额和毛利。</output>'});
   }
 }

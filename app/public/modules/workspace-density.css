@@ -1,0 +1,419 @@
+/* Compact entry forms use the same layout as the contract pilot. */
+dialog.form-dialog:has(> .compact-business-form) {
+  width: min(820px, calc(100vw - 40px));
+}
+dialog.form-dialog:has(> :is(.contract-create-form, .compact-business-form[data-form="quote"])) {
+  width: min(920px, calc(100vw - 40px));
+}
+dialog.form-dialog > :is(.compact-business-form, .contract-create-form) > .dialog-head {
+  padding: 14px 22px;
+}
+dialog.form-dialog > :is(.compact-business-form, .contract-create-form) > .form-grid {
+  padding: 16px 22px;
+  gap: 12px 16px;
+  align-items: start;
+}
+dialog.form-dialog > :is(.compact-business-form, .contract-create-form) > .dialog-footer {
+  padding: 10px 22px;
+  align-items: center;
+}
+.compact-business-form .form-context,
+.compact-business-form .workflow-notice,
+.compact-business-form .receipt-preview,
+.compact-business-form .activity-plan-panel {
+  margin-block: 0;
+  padding: 9px 12px;
+}
+.compact-business-form .field-help {
+  margin-block: 0;
+}
+.compact-business-form .receipt-contract-picker {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 16px;
+}
+.compact-business-form .quote-footer-total {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+
+.customer-list-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border-bottom: 1px solid var(--line);
+  padding-inline-end: 12px;
+}
+.customer-list-summary .customer-scope-tabs {
+  border: 0;
+}
+.customer-list-summary .company-profile-progress {
+  flex-shrink: 0;
+}
+.customer-list-summary .company-profile-progress .btn {
+  min-height: 34px;
+}
+.activity-advanced {
+  margin-top: 7px;
+}
+.activity-advanced > summary {
+  padding: 6px 0;
+  min-height: 34px;
+  cursor: pointer;
+  color: var(--sail-deep);
+  font-size: 13px;
+}
+.activity-advanced > summary span {
+  margin-inline-start: 8px;
+  color: var(--secondary);
+  font-size: 12px;
+}
+.activity-advanced[open] > .activity-filters {
+  padding-top: 6px;
+}
+.performance-score-detail {
+  margin-block: 8px;
+  border-top: 1px solid var(--line);
+}
+.performance-score-detail > summary {
+  padding-block: 8px;
+  font-size: 13px;
+  color: var(--sail-deep);
+  cursor: pointer;
+}
+
+@media (min-width: 761px) {
+  #content[data-view]:not([data-view="intake"]) {
+    padding-top: 18px;
+  }
+  #content[data-view]:not([data-view="intake"]) > .page-heading {
+    margin-bottom: 12px;
+  }
+  #content[data-view="customers"] .monthly-board,
+  #content :is(.contract-workflow-summary, .workflow-filtered-summary, .commission-live) .metrics {
+    margin-bottom: 10px;
+  }
+  #content[data-view="customers"] .monthly-board-scope {
+    margin-bottom: 5px;
+  }
+  #content[data-view="customers"] .monthly-board-card {
+    padding: 8px 12px;
+  }
+  #content[data-view="customers"] .monthly-board-value {
+    margin: 2px 0 0;
+    font-size: 20px;
+  }
+  #content[data-view="customers"] .monthly-board-note {
+    display: none;
+  }
+  #content :is(.contract-workflow-summary, .workflow-filtered-summary, .commission-live) .metrics {
+    padding-block: 10px;
+  }
+  #content :is(.contract-workflow-summary, .workflow-filtered-summary, .commission-live) .metric {
+    min-width: 0;
+    padding-inline: 14px;
+  }
+  #content :is(.contract-workflow-summary, .workflow-filtered-summary, .commission-live) .metric-value {
+    margin: 3px 0 2px;
+    font-size: 23px;
+    overflow-wrap: anywhere;
+  }
+  #content .workflow-scope-caption {
+    margin-bottom: 5px;
+  }
+  #content .workflow-list-toolbar {
+    padding: 6px 14px;
+  }
+  #content .customer-list-summary .customer-scope-tabs > button {
+    padding-block: 8px;
+    min-height: 38px;
+  }
+  #content .customer-list-panel > .filterbar,
+  #content:is([data-view="contracts"], [data-view="collections"]) > .panel > .filterbar {
+    padding: 7px 14px;
+  }
+
+  /* Scroll just the rows so the column labels stay in view. */
+  #content :is(.customer-desktop-table, .workflow-daily-scroll, .workflow-ledger-scroll, .minutes-records-scroll, .minutes-runs-scroll) {
+    max-height: max(320px, calc(100dvh - 350px));
+    overflow: auto;
+    scroll-padding-top: 40px;
+  }
+  #content :is(.customer-desktop-table, .workflow-daily-scroll, .workflow-ledger-scroll, .minutes-records-scroll, .minutes-runs-scroll) > .data-table {
+    border-collapse: separate;
+    border-spacing: 0;
+  }
+  #content :is(.customer-desktop-table, .workflow-daily-scroll, .workflow-ledger-scroll, .minutes-records-scroll, .minutes-runs-scroll) > .data-table > thead th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    height: 36px;
+    background: #fafbfd;
+    padding-block: 6px;
+    font-size: 12px;
+  }
+  #content :is(.customer-desktop-table, .workflow-daily-scroll, .workflow-ledger-scroll, .minutes-records-scroll, .minutes-runs-scroll) > .data-table > tbody > tr > td {
+    height: 58px;
+    padding-block: 7px;
+  }
+  #content .customer-desktop-table td {
+    padding-inline: 13px;
+  }
+  #content .customer-desktop-table .company-cell {
+    gap: 8px;
+  }
+  #content .customer-desktop-table .record-meta,
+  #content .workflow-daily-table .record-meta {
+    margin-top: 2px;
+  }
+  #content .workflow-daily-table .workflow-record-title {
+    display: block;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  #content .workflow-daily-table .workflow-status-stack {
+    gap: 3px;
+  }
+
+  #content .activity-workspace,
+  #content .performance-workspace,
+  #content .minutes-workspace {
+    gap: 12px;
+  }
+  #content .activity-workspace .activity-toolbar,
+  #content .performance-workspace .performance-toolbar {
+    margin-bottom: 0;
+    padding: 12px 16px;
+  }
+  #content .activity-toolbar-top,
+  #content .performance-workspace .performance-toolbar .section-head {
+    margin-bottom: 8px;
+  }
+  #content .activity-result-count {
+    margin-top: 6px;
+    padding-top: 7px;
+    gap: 6px 16px;
+  }
+  #content .activity-record-list {
+    gap: 10px;
+  }
+  #content .activity-record {
+    padding: 12px 15px;
+  }
+  #content .activity-record-target,
+  #content .activity-record-summary {
+    margin-top: 6px;
+  }
+  #content .activity-record-next {
+    margin-top: 6px;
+    padding: 6px 8px;
+  }
+  #content .activity-event-list {
+    margin-top: 8px;
+    padding-top: 6px;
+  }
+
+  #content .performance-workspace .performance-overview {
+    gap: 8px;
+  }
+  #content .performance-workspace .performance-overview-item {
+    gap: 4px;
+    padding: 9px 12px;
+  }
+  #content .performance-workspace .performance-card {
+    padding: 15px;
+  }
+  #content .performance-workspace .performance-target,
+  #content .performance-workspace .performance-category-grid {
+    margin-block: 10px;
+  }
+  #content .performance-workspace .performance-target,
+  #content .performance-workspace .performance-category {
+    padding: 8px 10px;
+  }
+  #content .performance-workspace .performance-score-grid > div {
+    padding: 8px 10px;
+  }
+
+  #content .commission-toolbar .section-head {
+    padding: 12px 16px 6px;
+  }
+  #content .commission-toolbar .commission-filters {
+    padding: 6px 16px;
+  }
+  #content .commission-toolbar .commission-view-filters {
+    padding-inline: 16px;
+    padding-bottom: 8px;
+  }
+  #content .commission-filter-scope {
+    padding: 0 16px 10px;
+  }
+  #content .commission-card-list {
+    gap: 12px;
+    padding: 12px 16px 14px;
+  }
+  #content .commission-person-head {
+    padding: 12px 16px 10px;
+  }
+  #content .commission-component {
+    padding: 8px 10px;
+  }
+  #content .commission-person-summary {
+    padding-bottom: 9px;
+  }
+  #content .commission-components,
+  #content .commission-receipt-total,
+  #content .commission-tier-note,
+  #content .commission-person-issues {
+    margin-bottom: 9px;
+  }
+  #content .commission-receipt-total,
+  #content .commission-tier-note {
+    padding: 7px 10px;
+  }
+  #content .commission-calculation > summary {
+    padding-block: 9px;
+  }
+  #content .commission-task {
+    padding-block: 10px;
+  }
+
+  #content .minutes-workspace .minutes-connections,
+  #content .minutes-total {
+    padding: 8px 14px;
+  }
+  #content .minutes-workspace-title,
+  #content .minutes-tools {
+    padding: 8px 14px;
+  }
+  #content .minutes-tools {
+    margin-block: 8px;
+  }
+  #content .minutes-content > .table-scroll {
+    margin-top: 8px;
+  }
+  #content .minutes-workspace:not(.minutes-filters-open) .minutes-tools > label[data-minutes-advanced] {
+    display: none;
+  }
+  #content .minutes-tools .minutes-advanced-toggle:not([hidden]) {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    align-self: end;
+    gap: 6px;
+  }
+
+  #content .workbench-metric {
+    padding-block: 9px;
+  }
+  #content .workbench-task-row {
+    padding-block: 8px;
+  }
+  #content .workbench-task-copy p {
+    margin-block: 2px;
+  }
+  #content :is(.management-list-row, .management-customer-row, .team-member-row, .team-risk-row) {
+    padding-block: 8px;
+  }
+  dialog.drawer > :is(.customer-detail-head, .opportunity-detail-head, .workspace-head) {
+    padding-block: 16px;
+  }
+  dialog.drawer > :is(.customer-workspace, .opportunity-workspace, .workflow-workspace) {
+    padding-top: 14px;
+  }
+  dialog.drawer > :is(.customer-workspace, .opportunity-workspace, .workflow-workspace) .detail-actionbar {
+    margin-bottom: 12px;
+  }
+}
+
+@media (min-width: 1050px) {
+  #content .activity-filters {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+}
+@media (min-width: 1200px) {
+  #content .minutes-tools {
+    grid-template-columns: minmax(160px, 1.4fr) minmax(108px, 1fr) minmax(215px, 1.6fr) minmax(78px, .65fr) max-content max-content;
+    gap: 8px;
+  }
+  #content .minutes-tools :is(.minutes-search-label, .minutes-dates) {
+    grid-column: auto;
+  }
+  #content .activity-record-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+  }
+  .activity-record-list > :is(.empty, .activity-pagination) {
+    grid-column: 1 / -1;
+  }
+  #content .performance-workspace .performance-score-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+@media (min-width: 1380px) {
+  #content .commission-toolbar {
+    display: grid;
+    grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+    column-gap: 6px;
+  }
+  #content .commission-toolbar > :is(.section-head, .commission-update-status, .commission-filter-scope) {
+    grid-column: 1 / -1;
+  }
+  #content .commission-toolbar > :is(.commission-filters, .commission-view-filters) {
+    align-self: end;
+    gap: 8px;
+    border-bottom: 0;
+  }
+  #content .commission-toolbar > .commission-view-filters {
+    padding: 6px 16px 6px 0;
+  }
+}
+@media (min-width: 901px) {
+  .compact-business-form:is([data-form="customer"], [data-form="edit-customer"], [data-form="opportunity"], [data-form="edit-opportunity"]) > .form-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+@media (min-width: 761px) {
+  .compact-business-form .quote-item-row {
+    grid-template-columns: minmax(0, 2.2fr) minmax(90px, 1fr) minmax(65px, .65fr) minmax(104px, 1fr) minmax(79px, .75fr) 32px;
+    margin-bottom: 8px;
+  }
+  .compact-business-form .quote-item-row > .field:first-child {
+    grid-column: auto;
+  }
+  .compact-business-form .quote-item-row > .icon-btn {
+    width: 32px;
+  }
+}
+@media (max-width: 600px) {
+  dialog.form-dialog:has(> :is(.contract-create-form, .compact-business-form[data-form])) {
+    width: calc(100vw - 24px);
+  }
+  dialog.form-dialog > :is(.compact-business-form, .contract-create-form) > :is(.dialog-head, .form-grid, .dialog-footer) {
+    padding-inline: 14px;
+  }
+  .compact-business-form > .form-grid,
+  .compact-business-form .receipt-contract-picker {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .compact-business-form .quote-footer-total {
+    flex: 0 0 100%;
+  }
+}
+@media print {
+  #content :is(.customer-desktop-table, .workflow-daily-scroll, .workflow-ledger-scroll, .minutes-records-scroll, .minutes-runs-scroll) {
+    max-height: none;
+    overflow: visible;
+  }
+  #content :is(.customer-desktop-table, .workflow-daily-scroll, .workflow-ledger-scroll, .minutes-records-scroll, .minutes-runs-scroll) > .data-table > thead th {
+    position: static;
+  }
+  #content .activity-record-list {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

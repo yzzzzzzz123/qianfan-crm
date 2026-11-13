@@ -137,11 +137,19 @@ function policyDetails(S,rule,policy){
   if(!policy&&S.actor.role!=='admin')return '';
   return `<section class="panel commission-rules"><details><summary>查看提成规则与梯度</summary>${policy?`${sectionHead('销售个人提成梯度','达到档位后，整笔基数乘对应比例。',S.actor.role==='admin'?button('调整个人提成梯度','sales-commission-policy','','secondary','edit'):'')}${policyMatrix(policy,'product')}${policyMatrix(policy,'service')}<p class="panel-copy">产品按当月实际回款毛利合计选档。开发运维${policy.service_scope_confirmed?'按':'范围待定，暂按'}${policy.service_aggregation==='contract'?'每份合同的实际服务回款':'当月实际服务回款合计'}选档。空白比例保留待核实。个人规则自 ${esc(policy.effective_month)} 起适用。</p>`:''}${S.actor.role==='admin'?`${sectionHead('团队管理提成','每月按其他参与计提销售的实际回款毛利选档。',button('调整团队提成规则','finance-rules','','secondary','edit'))}<p class="panel-copy">当月回款毛利合计不超过 ${plainMoney(rule.threshold)} 时，全额按 ${percent(rule.low_rate)} 计提。超过阈值时，全额按 ${percent(rule.high_rate)} 计提。</p>`:''}</details></section>`;
 }
+
+function commissionMetric(rows, completeNote) {
+  if(!rows.length)return ['—','当前筛选无记录'];
+  const amounts=rows.map(estimated).filter(finite);
+  if(!amounts.length)return ['待完善信息','补充信息后更新'];
+  const note=amounts.length<rows.length?'已算部分，完整金额待补齐':rows.some(isCommissionPending)?'含暂算或待完善项':completeNote;
+  return [plainMoney(sum(amounts,amount=>amount)),note];
+}
+
 export function commissions(S,P={}) {
   const data=S.commission,rule=S.rules.commission||{},previews=data.realtime_previews||data.previews||[],policy=rule.sales_policy||previews.find(p=>p.policy)?.policy;
   const rows=selectCommissionRows(S,P),management=rows.filter(p=>p.kind==='management'),personal=rows.filter(p=>p.kind==='personal');
-  const totals=sum(personal,p=>finite(estimated(p))?estimated(p):0),allUnknown=personal.length&&personal.every(whollyPending),partial=personal.some(isCommissionPending);
-  const totalLabel=S.actor.role==='admin'?'个人实时提成':'我的实时提成',totalValue=allUnknown?'待完善信息':personal.length?plainMoney(totals):'—';
+  const admin=S.actor.role==='admin';
   const componentMetric=type=>{
     const components=personal.flatMap(p=>(p.components||[]).filter(c=>c.type===type));
     if(!components.length)return ['—','当前周期按毛利口径查看'];
@@ -151,7 +159,23 @@ export function commissions(S,P={}) {
   const updated=data.updated_at&&Number.isFinite(Date.parse(data.updated_at))?new Date(data.updated_at).toLocaleTimeString('zh-CN',{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'}):'';
   const product=componentMetric('product'),service=componentMetric('service'),monthly=/^\d{4}-\d{2}$/.test(data.period),tasks=commissionIssueRows(S,P);
   const managementBasis=monthly?`${periodLabel(data.period)} · 按其他销售实际到账的产品与开发运维毛利选档`:'按原累计毛利口径查看';
-  const metricsHtml=metrics([[totalLabel,totalValue,`${esc(periodLabel(data.period))} · ${partial?'当前已算部分，含暂算提示':'按最新业务计算'}`,'wallet'],['产品提成',product[0],product[1],'contracts'],['开发运维提成',service[0],service[1],'check'],['待处理事项',String(tasks.length),`${new Set(tasks.map(t=>t.sales_id)).size} 位成员 · 普通说明不计入`,'clock']]);
+  const [personalValue,personalNote]=commissionMetric(personal,'按最新业务计算');
+  const summary=[
+    [admin?'个人实时提成':'我的实时提成',personalValue,`${esc(periodLabel(data.period))} · ${personalNote}`,'wallet'],
+    ['产品提成',...product,'contracts'],
+    ['开发运维提成',...service,'check'],
+    ['待处理事项',String(tasks.length),`${new Set(tasks.map(t=>t.sales_id)).size} 位成员 · 普通说明不计入`,'clock'],
+  ];
+  if(admin){
+    const [totalValue,totalNote]=commissionMetric([...personal,...management],'个人提成 + 团队管理提成');
+    const [teamValue,teamNote]=commissionMetric(management,monthly?'按当月回款毛利计算':'按原累计毛利口径计算');
+    const teamLink=management.length?' <button type="button" class="text-link commission-management-link" data-action="commission-management-detail">查看团队明细</button>':'';
+    summary.unshift(
+      ['实时提成合计',totalValue,totalNote,'wallet'],
+      ['团队管理提成',teamValue,teamNote+teamLink,'team'],
+    );
+  }
+  const metricsHtml=admin?`<div class="commission-summary-with-team">${metrics(summary)}</div>`:metrics(summary);
   return `<div class="commission-live"><section class="panel commission-toolbar">${sectionHead(S.actor.role==='admin'?'团队提成工作台':'我的提成','按最新业务实时计算；有疑问的合同单独列出，不影响其他明确金额。')}<p class="commission-update-status">自动更新${updated?` · 更新于 ${esc(updated)}`:''}</p><div class="filterbar commission-filters">${periodControl(S,data)}${button('刷新金额','commission-refresh','','secondary','refresh')}</div>${viewFilters(S,P)}<p class="commission-filter-scope">${S.actor.role==='admin'?'筛选当前显示的人员及其完整当期金额':'仅展示本人数据'} · 实时合计、合同依据和待完善清单采用相同筛选条件。</p></section>${metricsHtml}<section class="panel commission-overview">${sectionHead(S.actor.role==='admin'?'个人提成':'我的提成明细',monthly?`${periodLabel(data.period)} · 产品按实际回款毛利、开发运维按实际回款`:'按原累计毛利口径查看，非月度提成汇总')}${policy&&monthly&&data.period<policy.effective_month?`<p class="commission-period-note">该月份早于个人规则生效时间 ${esc(policy.effective_month)}，个人提成按现行口径作参考。</p>`:''}<div class="commission-card-list">${personal.map(p=>commissionCard(S,data,p)).join('')||'<p class="commission-empty">当前筛选条件下没有匹配的个人提成记录，可调整人员、状态或搜索内容。</p>'}</div>${issueQueue(S,P,'personal')}</section>${management.length?`<section class="panel commission-management">${sectionHead('团队管理提成',managementBasis)}<div class="commission-card-list">${management.map(p=>commissionCard(S,data,p)).join('')}</div>${issueQueue(S,P,'management')}</section>`:''}${historyRecords(S,data,P)}${monthly?`<section class="panel commission-receipt-section"><details><summary>查看当月实际到账依据</summary>${receiptReview(S,data,rows)}</details></section>`:''}${policyDetails(S,rule,policy)}</div>`;
 }
 export {performance,syncPerformanceReviewPreview,performanceQuoteDetail,selectPerformanceRows} from './performance-view.js';

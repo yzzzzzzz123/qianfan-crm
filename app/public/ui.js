@@ -143,6 +143,7 @@ export function formShell(
   type,
   id = "",
   submit = "保存",
+  {className = '', footerSummary = ''} = {},
 ) {
-  return `<form data-form="${type}" data-id="${esc(id)}" data-key="${crypto.randomUUID()}"><header class="dialog-head"><div><h2>${esc(title)}</h2>${description?`<p>${esc(description)}</p>`:''}</div><button type="button" class="icon-btn" data-action="close" aria-label="关闭">${icon('close')}</button></header><div class="dialog-body form-grid"><p class="form-error wide" role="alert" tabindex="-1"></p>${fields}</div><footer class="dialog-footer"><button type="button" class="btn ghost" data-action="close">取消</button><button class="btn primary" type="submit">${esc(submit)}</button></footer></form>`;
+  return `<form data-form="${type}" data-id="${esc(id)}" data-key="${crypto.randomUUID()}"${className?` class="${esc(className)}"`:''}><header class="dialog-head"><div><h2>${esc(title)}</h2>${description?`<p>${esc(description)}</p>`:''}</div><button type="button" class="icon-btn" data-action="close" aria-label="关闭">${icon('close')}</button></header><div class="dialog-body form-grid"><p class="form-error wide" role="alert" tabindex="-1"></p>${fields}</div><footer class="dialog-footer">${footerSummary}<button type="button" class="btn ghost" data-action="close">取消</button><button class="btn primary" type="submit">${esc(submit)}</button></footer></form>`;
 }

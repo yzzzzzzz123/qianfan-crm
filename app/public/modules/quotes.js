@@ -28,9 +28,9 @@ export function formQuotes(S,id,options) {
   const o=S.opportunities.find(row=>row.id===Number(id));
   return formShell('登记报价','',
     select('opportunity_id','关联商机',[['','请选择商机'],...options.oppOptions],id||'','required')+
-    `<div class="wide items-editor"><div class="section-head"><h3>报价明细</h3><button type="button" class="btn ghost" data-action="add-quote-item">${icon('plus')}添加明细</button></div><div id="quote-items">${quoteItemRow(0,suggestedItem(o))}</div><p class="quote-total">折后合计 <b id="quote-total">0.00</b> 元</p></div>
+    `<div class="wide items-editor"><div class="section-head"><h3>报价明细</h3><button type="button" class="btn ghost" data-action="add-quote-item">${icon('plus')}添加明细</button></div><div id="quote-items">${quoteItemRow(0,suggestedItem(o))}</div></div>
     <label class="field wide">报价附件（选填）<input type="file" name="file" accept=".pdf,.docx,.xlsx,.png,.jpg,.jpeg,.webp"><small class="muted">支持 PDF、Word（.docx）、Excel（.xlsx）和图片，最多 10 MB。</small></label>`+
-    textarea('note','备注'),'quote',id,'保存报价');
+    textarea('note','备注'),'quote',id,'保存报价',{footerSummary:'<output class="quote-footer-total">折后合计 <b id="quote-total">0.00</b> 元</output>'});
 }
 
 export function syncQuoteTotal(form) {

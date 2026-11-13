@@ -1,4 +1,19 @@
 .commission-live .metrics{grid-template-columns:repeat(4,minmax(0,1fr))}
+.commission-summary-with-team .metrics{grid-template-columns:repeat(3,minmax(0,1fr))}
+.commission-management-link{display:block;margin-top:3px;font-size:12px}
+.commission-management{scroll-margin-top:12px}
+@media (min-width:1280px) {
+  .commission-summary-with-team .metrics{grid-template-columns:repeat(6,minmax(0,1fr))}
+}
+@media (min-width:701px) and (max-width:1279px) {
+  .commission-summary-with-team .metric:nth-child(3){border-inline-end:0}
+  .commission-summary-with-team .metric:nth-child(-n+3){border-bottom:1px solid var(--line);padding-bottom:8px}
+  .commission-summary-with-team .metric:nth-child(n+4){padding-top:8px}
+}
+@media (max-width:700px) {
+  .commission-summary-with-team .metric:nth-child(even){border-inline-end:0}
+  .commission-summary-with-team .metric:nth-child(-n+4){border-bottom:1px solid var(--line)}
+}
 .commission-live .metric-value{font-size:27px;overflow-wrap:anywhere}
 .commission-live .commission-filters{justify-content:flex-start;align-items:flex-end;gap:12px;flex-wrap:wrap}
 .commission-live .commission-filters>#filter-owner,.commission-live .commission-filters>.search-select{margin-left:auto;min-width:150px}

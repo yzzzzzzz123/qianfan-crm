@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { fixture, customer } from "./helpers/fixture.mjs";
 
 test("M02-A01 新增联系人可回读角色态度，他人销售不能维护", async (t) => {
@@ -99,6 +100,31 @@ test("M02-A03 中文客户创建后可回读，重复客户与信用代码被拒
     ).status,
     409,
   );
+});
+
+test("疑似同名返回可确认的冲突，勾选后可用原操作编号重试", async (t) => {
+  const f = await fixture(t);
+  const admin = await f.login(1);
+  const actor = await f.login(2);
+  const existingName = "深圳蓝海数字科技有限公司";
+  const body = { name: "深圳蓝海数智科技有限公司" };
+  const key = randomUUID();
+  const create = (data) => f.request("/customers", { actor, method: "POST", body: data, key });
+
+  assert.equal((await f.request("/customers", {
+    actor: admin, method: "POST", body: customer({ name: existingName }),
+  })).status, 200);
+  const conflict = await create(body);
+  assert.equal(conflict.status, 409);
+  assert.equal(conflict.body.code, "CUSTOMER_SIMILAR_NAME");
+  assert.ok(conflict.body.error.includes(existingName));
+
+  const confirmed = { ...body, duplicate_ack: true };
+  const saved = await create(confirmed);
+  assert.equal(saved.status, 200);
+  assert.equal((await create(confirmed)).body.id, saved.body.id);
+  const state = (await f.request("/state", { actor })).body;
+  assert.equal(state.customers.find(c => c.id === saved.body.id).owner_id, 2);
 });
 
 test("M02-A04 明确核对后连带移交业务，并撤销原销售可见范围", async (t) => {

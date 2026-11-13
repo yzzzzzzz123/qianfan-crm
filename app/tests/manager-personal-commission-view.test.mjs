@@ -19,8 +19,13 @@ test('月度筛选同时使用选中月份的个人提成和团队管理提成',
  assert.deepEqual(selectCommissionRows(state).map(row=>[row.sales_id,row.kind,row.period]),[[1,'personal','2026-11'],[1,'management','2026-11'],[2,'personal','2026-11']]);
  const own=selectCommissionRows(state,{owner:'1'});assert.equal(own.length,2);assert.equal(own.find(row=>row.kind==='personal').estimated_total,600000);
 });
-test('王宏个人进入个人区和月度合计，团队管理仅在独立管理区',()=>{
+test('实时汇总合计个人和团队金额，并提供跳转团队明细的入口',()=>{
  const html=commissions(managerPersonalViewState()),overview=html.split('<section class="panel commission-overview">')[1].split('<section class="panel commission-management">')[0],team=html.split('<section class="panel commission-management">')[1].split('<section class="panel commission-history">')[0];
+ const summary=html.split('<section class="panel commission-overview">')[0];
+ assert.match(summary,/实时提成合计[^]*?<div class="metric-value">¥13,900<\/div>/);
+ assert.match(summary,/个人实时提成[^]*?<div class="metric-value">¥8,500<\/div>/);
+ assert.match(summary,/团队管理提成<svg[^]*?<div class="metric-value">¥5,400<\/div>/);
+ assert.match(summary,/data-action="commission-management-detail">查看团队明细/);
  assert.match(overview,/data-sales-id="1" data-commission-kind="personal"/);assert.match(overview,/data-sales-id="2" data-commission-kind="personal"/);assert.doesNotMatch(overview,/data-commission-kind="management"/);
  assert.match(team,/data-sales-id="1" data-commission-kind="management"/);assert.doesNotMatch(team,/data-commission-kind="personal"/);
  assert.match(html,/个人实时提成/);assert.match(html,/¥8,500/);assert.match(html,/A级/);assert.doesNotMatch(html,/管理者个人与团队提成|服务按签约额|服务合同金额合计|绩效待完善/);
@@ -38,6 +43,7 @@ test('负责人筛选、实际到账依据和导出使用同一管理月份与�
  assert.deepEqual(result.summaryRows[2].slice(6,12),['','','','','',180000]);
  assert.deepEqual(result.detailRows[2].slice(6,10),['开发运维实际回款毛利',60000,.03,1800]);
  assert.match(html,/¥6,000/);assert.doesNotMatch(html,/data-sales-id="2" data-commission-kind="personal"/);
+ assert.match(html,/实时提成合计[^]*?<div class="metric-value">¥11,400<\/div>/);
  assert.match(html.split('<section class="panel commission-receipt-section">')[1],/HT-SALES/);
 });
 test('王宏月度待完善项与合同搜索不因管理员角色漏掉或变成管理问题',()=>{
@@ -55,8 +61,21 @@ test('旧季度个人与团队查询继续按原周期，历史已发放快照�
  assert.deepEqual(selectCommissionRows(state).map(row=>[row.kind,row.period]),[['personal','2026Q4'],['management','2026Q4']]);
  const history=selectCommissionHistory(state);assert.equal(history[0].amount,123456);assert.match(commissions(state),/2026 年第 4 季度/);assert.equal(JSON.stringify(state.commission.batches),before);
  assert.doesNotMatch(commissions(state),/团队本月实际回款总额/);
+ assert.match(commissions(state),/实时提成合计[^]*?<div class="metric-value">¥16,200<\/div>/);
 });
 test('销售视角仍仅本人个人提成，管理员个人行不能借owner筛选越权导出',()=>{
  const state=managerPersonalViewState();state.actor={id:2,name:'销售甲',role:'sales'};
  assert.deepEqual(selectCommissionRows(state,{owner:'1'}).map(row=>row.sales_id),[2]);assert.equal(buildCommissionExport(state,{owner:'1'}).summaryRows.length,2);assert.doesNotMatch(commissions(state,{owner:'1'}),/data-sales-id="1"/);
+ assert.doesNotMatch(commissions(state,{owner:'1'}),/实时提成合计|data-action="commission-management-detail"/);
+});
+
+test('团队金额待完善时汇总展示已算部分，并沿用状态筛选',()=>{
+ const state=managerPersonalViewState(),team=state.commission.realtime_previews.find(row=>row.kind==='management');
+ team.estimated_total=null;
+ const summary=commissions(state).split('<section class="panel commission-overview">')[0];
+ assert.match(summary,/实时提成合计[^]*?<div class="metric-value">¥8,500<\/div><p>已算部分，完整金额待补齐/);
+ assert.match(summary,/团队管理提成<svg[^]*?<div class="metric-value">待完善信息<\/div>/);
+ const calculated=commissions(state,{commissionStatus:'calculated'}).split('<section class="panel commission-overview">')[0];
+ assert.match(calculated,/团队管理提成<svg[^]*?<div class="metric-value">—<\/div>/);
+ assert.doesNotMatch(calculated,/data-action="commission-management-detail"/);
 });

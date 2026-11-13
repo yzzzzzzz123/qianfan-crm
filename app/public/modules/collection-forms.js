@@ -32,8 +32,7 @@ export function collectionForm(S,type,id){
     if(c&&!contracts.includes(c))return empty('此合同当前不能新增该记录',c.lifecycle==='草稿'?'请先确认这份历史草稿已签署；附件可后补。':c.terminated_at&&plan?'已终止合同不新增收款计划，仍可核对原计划和后续实收。':'合同已结清，可在收款计划与流水中查看历史或核对原记录。',button('返回','close','','secondary'));
     if(!contracts.length)return empty('请先新增合同','新增合同后即可安排收款计划和登记实收；历史草稿需先确认签署。',button('关闭','close','','secondary'));
     const selector=c?`<input type="hidden" name="contract_id" value="${c.id}">${context(S,c)}`:
-      `<label class="field wide">筛选合同<input type="search" data-contract-search placeholder="输入合同编号、客户或名称" autocomplete="off"></label>`+
-      `<div class="wide">${select('contract_id','关联合同',[['','请选择合同'],...contracts.map(c=>[c.id,contractCaption(S,c)])],'','required')}</div>`+context(S,null);
+      `<div class="wide receipt-contract-picker"><label class="field">筛选合同<input type="search" data-contract-search placeholder="输入合同编号、客户或名称" autocomplete="off"></label>${select('contract_id','关联合同',[['','请选择合同'],...contracts.map(c=>[c.id,contractCaption(S,c)])],'','required')}</div>`+context(S,null);
     const fields=plan?
       input('amount','计划金额（元）','','number',true,'min="0.01" step="0.01"')+input('promise_date','预计收款日','','date')+input('checkpoint_date','催办检查点（选填）','','date',false)+textarea('note','收款条件／备注')+
       '<div class="wide receipt-preview" data-plan-preview aria-live="polite">计划不会计入实际到账，合计不能超过未安排余额。</div>':

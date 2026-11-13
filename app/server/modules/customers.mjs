@@ -1,5 +1,5 @@
 import {createHash} from 'node:crypto';
-import { assert, text, choice, now, today, similarCustomer, validDate } from "../domain.mjs";
+import { AppError, assert, text, choice, now, today, similarCustomer, validDate } from "../domain.mjs";
 import { one, run } from "../database.mjs";
 import { all } from "../database.mjs";
 import { assertOwnershipUnlocked, contractLocks } from "./incentives.mjs";
@@ -82,8 +82,14 @@ export function handleCustomers(context) {
     const norm = normalizeCompanyName(name);
     const credit = normalizeCreditCode(text(b.credit_code || "", "统一社会信用代码", 40, false));
     assertCustomerIdentityUnique(db,{name,credit_code:credit});
-    const similar=all(db,'SELECT name FROM customers').filter(c=>similarCustomer(name,c.name));
-    assert(!similar.length||b.duplicate_ack===true||b.duplicate_ack==='on','存在疑似同名客户：'+similar.slice(0,3).map(c=>c.name).join('、')+'。请先核对档案；确认不同企业后勾选允许新建。',409);
+    if(b.duplicate_ack!==true&&b.duplicate_ack!=='on'){
+      const similar=all(db,'SELECT name FROM customers').filter(c=>similarCustomer(name,c.name)).slice(0,3);
+      if(similar.length){
+        const error=new AppError('存在疑似同名客户：'+similar.map(c=>c.name).join('、')+'。请核对档案，确认是不同企业后勾选允许新建。',409);
+        error.code='CUSTOMER_SIMILAR_NAME';
+        throw error;
+      }
+    }
     assert(
       !one(db, "SELECT id FROM customers WHERE normalized=?", norm),
       "已有同名客户，请先查看客户档案",

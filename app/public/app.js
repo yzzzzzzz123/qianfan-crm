@@ -19,7 +19,7 @@ import {intakeGuideCard} from './modules/intake.js';
 import {syncTargetForm} from './modules/targets.js';
 import {manualChoices,manualChooser,manualCreateActions,manualFormRoles} from './modules/manual-entry.js';
 import {followupFilters,reportMonthForPage,selectCustomers,customerSearchText} from './modules/shared.js';
-import {mountCustomerForm,refreshCustomerTransfer,customerEditPayload} from './modules/customer-controller.js';
+import {mountCustomerForm,refreshCustomerTransfer,customerEditPayload,showCustomerCreateError} from './modules/customer-controller.js';
 import {mountOpportunityForm,activityPlanPayload,opportunityEditPayload} from './modules/opportunity-controller.js';
 import {activityEventDetail,mountActivityForm} from './modules/activities.js';
 import {workbenchMetricDetail} from './modules/workbench.js';
@@ -117,7 +117,9 @@ async function showReview(){const data=await api('/data-review');openHtml(review
 const livePresence=createPresenceController({getState:()=>S,getPage:()=>current,api});
 function content() {
   minutesController.beforeRender();
-  document.querySelector("#content").innerHTML = renderPage(S, getP());
+  const main = document.querySelector("#content");
+  main.dataset.view = current;
+  main.innerHTML = renderPage(S, getP());
   void minutesController.mountFilters();
   if(current==='intake')restoreIntakeUpload();
   livePresence.mount();
@@ -243,6 +245,18 @@ function openPanel(type, id, options={}) {
     receipt?.focus({preventScroll:true});
   }
 }
+const compactBusinessForms = new Set([
+  'customer', 'edit-customer', 'customer-level', 'customer-transfer', 'contact', 'edit-contact',
+  'opportunity', 'edit-opportunity', 'opportunity-stage', 'activity', 'activity-event-edit', 'activity-legacy-edit',
+  'quote', 'payment', 'payment-plan-create', 'collection-receive', 'payment-maintain', 'payment-plan',
+  'payment-allocation', 'payment-checkpoint', 'payment-reconcile', 'contract-meta', 'contract-project',
+  'contract-items', 'contract-maintain', 'item-margin', 'performance-review', 'target', 'bulk-targets',
+]);
+document.addEventListener('toggle',event=>{
+  if(current==='activities'&&event.target.matches?.('[data-activity-advanced]')&&event.target.isConnected){
+    getP().activityFiltersOpen=event.target.open;
+  }
+},true);
 function openForm(type, id = "", quarter = "") {
   formReturn = panel?{...panel,scrollTop:dialog.scrollTop,...customerSections()}:null;
   openHtml(formContent(S, type, id, quarter), false);
@@ -253,6 +267,19 @@ function openForm(type, id = "", quarter = "") {
   if(type==='target'&&dialog.querySelector('form[data-form="target"]'))syncTargetForm(dialog.querySelector('form'),S);
   if(['payment','payment-maintain'].includes(type)){syncPaymentFields(dialog.querySelector('form'));syncPaymentContext(dialog.querySelector('form'));}
   if(type==='quote')mountQuoteForm(dialog.querySelector('form'),S);
+  if(compactBusinessForms.has(type))dialog.querySelector('form')?.classList.add('compact-business-form');
+  const compactForm=dialog.querySelector('.contract-create-form, .compact-business-form');
+  compactForm?.addEventListener('invalid',event=>{
+    const field=event.target;
+    for(let section=field.closest('details');section;section=section.parentElement.closest('details'))section.open=true;
+    const trigger=field.closest('.search-select')?.querySelector('.search-select-trigger');
+    if(trigger&&compactForm.querySelector(':invalid')===field){
+      const error=compactForm.querySelector('.form-error');
+      error.textContent='请选择'+trigger.getAttribute('aria-label');
+      trigger.focus();
+      event.preventDefault();
+    }
+  },true);
   if(['contact','edit-contact'].includes(type))syncContactMethods(dialog.querySelector('form'));
   mountCustomerForm(dialog.querySelector('form'),S,{api});
   if(type==='activity'&&dialog.querySelector('form'))dialog.querySelector('form').dataset.contextOpportunity=id||'';
@@ -532,6 +559,15 @@ document.addEventListener("click", async (e) => {
       await reload();return;
     }
     if(action==='commission-issue'){await openCommissionIssue(el);return;}
+    if(action==='commission-management-detail'){
+      const heading=document.querySelector('.commission-management h2');
+      if(heading){
+        heading.tabIndex=-1;
+        heading.focus({preventScroll:true});
+        heading.closest('.commission-management').scrollIntoView({block:'start'});
+      }
+      return;
+    }
     if(action==='commission-export-choose'){
       openHtml(`<header class="dialog-head"><div><h2>导出提成数据</h2><p>${esc(S.commission.period)} · 按当前人员、搜索和状态筛选导出</p></div><button class="icon-btn" data-action="close" aria-label="关闭">${icon('close')}</button></header><div class="dialog-body commission-export-options"><button class="btn secondary" data-action="commission-export-summary">导出人员汇总</button><p>按销售和实际计算周期列示实时金额。</p><button class="btn secondary" data-action="commission-export-detail">导出合同明细</button><p>核对合同、基数、比例与当前计提金额。</p><button class="btn secondary" data-action="commission-export-issues">导出待完善清单</button><p>列出问题、责任人与建议处理方式，方便集中补资料。</p></div>`);return;
     }
@@ -571,7 +607,11 @@ document.addEventListener("click", async (e) => {
       navigate(view);
       return;
     }
-    if(['edit-customer','edit-contact','customer-transfer','edit-opportunity','opportunity-stage'].includes(action)){openForm(action,id);return;}
+    if(['edit-customer','edit-contact','customer-transfer','edit-opportunity','opportunity-stage'].includes(action)){
+      const more=el.closest('.opportunity-row-more');
+      if(more){more.open=false;more.querySelector('summary').focus({preventScroll:true});}
+      openForm(action,id);return;
+    }
     if(action==='opportunity-view'){getP().opportunityView=id;getP().risk='';getP().sort='';if(id==='ledger')getP().owner='';content();return;}
     if(action==='customer-transfer-refresh'){await refreshCustomerTransfer(el.closest('form'));return;}
     if(action==='customer-scope'){getP().customerScope=id;getP().owner='';content();return;}
@@ -662,6 +702,7 @@ document.addEventListener("click", async (e) => {
         level: "",
         risk: "",
         sort: "",
+        opportunitySort: 'priority',
         from:'',to:'',source:'',saleType:'',customerLevel:'',
         managementPreset:'this-month',
         workflowFilter:'',
@@ -690,6 +731,7 @@ document.addEventListener("click", async (e) => {
       dialog
         .querySelector("#contract-items")
         .insertAdjacentHTML("beforeend", contractItemRow(S, rows.length));
+      dialog.querySelector('#contract-items .item-row:last-child [data-field="name"]')?.focus();
       return;
     }
     if(action==='add-quote-item') {
@@ -995,6 +1037,7 @@ document.addEventListener("submit", async (e) => {
     toast(result.message || "已保存");
   } catch (err) {
     showCollectionError(form,err);
+    showCustomerCreateError(form,err,b);
     error.textContent = err.message;
     if(error.isConnected){error.scrollIntoView({block:'start'});error.focus({preventScroll:true});}else toast(err.message,true);
   } finally {
@@ -1067,7 +1110,12 @@ document.addEventListener("change", async (e) => {
     if(fields)fields.innerHTML=intakeGuideCard(S,e.target.value);
     return;
   }
-  if(e.target.id==='opportunity-sort'){getP().opportunitySort=e.target.value;content();return;}
+  if(e.target.id==='opportunity-sort'){
+    getP().opportunitySort=e.target.value;
+    content();
+    document.querySelector('.opportunity-sort-picker summary')?.focus({preventScroll:true});
+    return;
+  }
   if(e.target.matches('form[data-form="payment"] [name="status"],form[data-form="payment-maintain"] [name="status"],form[data-form="payment-maintain"] [name="amount"]'))syncPaymentFields(e.target.form);
   if(e.target.matches('form[data-form="payment"] [name="contract_id"]'))syncPaymentContext(e.target.form);
   if(e.target.matches('form[data-form="target"] [name="user_id"],form[data-form="target"] [name="quarter"]'))syncTargetForm(e.target.form,S);

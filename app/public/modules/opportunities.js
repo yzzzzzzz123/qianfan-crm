@@ -90,8 +90,11 @@ function followLabel(S,o){
   const label=o.follow_date===S.today?'今天':dateLabel(o.follow_date);
   return o.follow_date<S.today?label+' · 已逾期':label;
 }
-function workActions(S,o){
-  return button('跟进','new-activity',o.id,'secondary','note')+(canEdit(S,o)&&!isWonStage(o.stage)&&!isLostStage(o.stage)?button('阶段','opportunity-stage',o.id,'ghost','edit'):'');
+function workActions(S,o,compact=false){
+  const follow=button('跟进','new-activity',o.id,'secondary','note');
+  if(!canEdit(S,o)||isWonStage(o.stage)||isLostStage(o.stage))return follow;
+  const stage=button(compact?'更新阶段':'阶段','opportunity-stage',o.id,'ghost','edit');
+  return follow+(compact?`<details class="opportunity-row-more"><summary class="icon-btn" aria-label="更多商机操作" title="更多商机操作"><span aria-hidden="true">…</span></summary>${stage}</details>`:stage);
 }
 function workAmount(o){
   const estimate=forecastAmount(o),actual=o.signed_summary;
@@ -99,12 +102,28 @@ function workAmount(o){
 }
 export function opportunityWorkList(S,list){
   if(!list.length)return empty('没有匹配的商机','可切换商机范围，或调整搜索和筛选条件。');
-  const table=`<div class="table-scroll opportunity-work-scroll"><table class="data-table opportunity-work-table"><thead><tr><th>客户 / 售卖产品</th><th>预计 / 有效签约</th><th>阶段 / 提醒</th><th>下一步行动 / 跟进时间</th><th>预计签约</th><th>销售</th><th>操作</th></tr></thead><tbody>${list.map(o=>`<tr data-opportunity-id="${o.id}"><td><button class="text-link opportunity-work-title" data-action="opportunity" data-id="${o.id}">${esc(customerLabel(S,o))}</button><span class="record-meta">${esc(o.name||'售卖产品待补充')}</span><small class="opportunity-code">${esc(o.code||'编号待补充')}</small></td><td class="opportunity-work-amount">${workAmount(o)}</td><td>${stageBadge(o.stage)}${riskSummary(o,true)}</td><td class="opportunity-work-action"><span>${esc(o.next_action||'下一步未安排')}</span><small class="${o.follow_date&&o.follow_date<S.today?'text-warning':''}">${esc(followLabel(S,o))}</small></td><td>${esc(o.expected_date?dateLabel(o.expected_date):'待确认')}<small class="record-meta">${esc(o.last_interaction?'最近沟通 '+dateLabel(o.last_interaction):'尚无沟通记录')}</small></td><td>${esc(salesName(S,o))}</td><td><div class="opportunity-row-actions">${workActions(S,o)}</div></td></tr>`).join('')}</tbody></table></div>`;
+  const table=`<div class="table-scroll opportunity-work-scroll" tabindex="0" role="region" aria-label="商机推进列表"><table class="data-table opportunity-work-table"><thead><tr><th>客户 / 售卖产品</th><th>预计 / 有效签约</th><th>阶段 / 提醒</th><th>下一步行动 / 跟进时间</th><th>预计签约</th><th>销售</th><th>操作</th></tr></thead><tbody>${list.map(o=>{
+    const customer=esc(customerLabel(S,o)),product=esc(o.name||'售卖产品待补充'),next=esc(o.next_action||'下一步未安排');
+    const reasons=riskReasons(o),risk=esc(reasons[0]||''),riskTooltip=esc(reasons.join(' · '));
+    const estimate=forecastAmount(o),actual=o.signed_summary,won=isWonStage(o.stage)&&actual;
+    const owner=esc(salesName(S,o));
+    return `<tr data-opportunity-id="${o.id}">
+      <td><button class="text-link opportunity-work-title" data-action="opportunity" data-id="${o.id}" title="${customer}">${customer}</button><span class="record-meta" title="${product} · ${esc(o.code||'编号待补充')}">${product}</span></td>
+      <td class="opportunity-work-amount"><strong>${optionalMoney(won?actual.amount:estimate)}</strong><small>${won?`初始预估 ${optionalMoney(estimate)}`:actual?.count>0?`有效签约 ${optionalMoney(actual.amount)}`:'预计商机金额'}</small></td>
+      <td>${stageBadge(o.stage)}${risk?`<span class="opportunity-row-risk ${o.risk?.level==='critical'?'text-danger':'text-warning'}" title="${riskTooltip}">${risk}${reasons.length>1?` +${reasons.length-1}`:''}</span>`:''}</td>
+      <td class="opportunity-work-action"><button type="button" class="text-link" data-action="opportunity" data-id="${o.id}" title="${next}">${next}</button><small class="${o.follow_date&&o.follow_date<S.today?'text-warning':''}">${esc(followLabel(S,o))}</small></td>
+      <td>${esc(o.expected_date?dateLabel(o.expected_date):'待确认')}<small class="record-meta">${esc(o.last_interaction?'沟通 '+dateLabel(o.last_interaction):'尚无沟通记录')}</small></td>
+      <td><span class="opportunity-row-owner" title="${owner}">${owner}</span></td>
+      <td><div class="opportunity-row-actions">${workActions(S,o,true)}</div></td>
+    </tr>`;
+  }).join('')}</tbody></table></div>`;
   const cards=`<div class="opportunity-work-cards">${list.map(o=>`<article class="opportunity-work-card" data-opportunity-id="${o.id}"><header><div><button class="text-link" data-action="opportunity" data-id="${o.id}">${esc(customerLabel(S,o))}</button><p>${esc(o.name||'售卖产品待补充')}</p></div>${stageBadge(o.stage)}</header><div class="opportunity-card-amount">${workAmount(o)}</div>${riskSummary(o,true)}<div class="opportunity-card-next"><span>下一步行动</span><p>${esc(o.next_action||'下一步未安排')}</p><small class="${o.follow_date&&o.follow_date<S.today?'text-warning':''}">${esc(followLabel(S,o))}</small></div><dl><div><dt>预计签约</dt><dd>${esc(o.expected_date?dateLabel(o.expected_date):'待确认')}</dd></div><div><dt>销售</dt><dd>${esc(salesName(S,o))}</dd></div></dl><footer>${workActions(S,o)}</footer></article>`).join('')}</div>`;
   return table+cards;
 }
 function workFilters(S,P){
-  return `<div class="filterbar opportunity-work-filters"><label class="list-search">${icon('search')}<input id="list-search" value="${esc(P.q||'')}" placeholder="搜索客户、售卖产品或商机编号" aria-label="搜索当前列表"></label><div class="filter-selects"><select id="filter-stage" aria-label="筛选阶段"><option value="">全部阶段</option>${S.stages.map(stage=>`<option value="${esc(stage)}" ${P.stage===stage?'selected':''}>${esc(stage)}</option>`).join('')}</select>${S.actor.role==='admin'?ownerOptions(S,P.owner||''):''}<select id="opportunity-sort" aria-label="商机推进排序">${[['priority','优先处理'],['follow_date','跟进日期'],['expected_date','预计签约日期'],['amount','预计金额从高到低']].map(([value,label])=>`<option value="${value}" ${(P.opportunitySort||'priority')===value?'selected':''}>${label}</option>`).join('')}</select>${button('重置筛选','reset-filters','','ghost','refresh')}</div></div>`;
+  const sorts=[['priority','优先处理'],['follow_date','跟进日期'],['expected_date','预计签约日期'],['amount','预计金额从高到低']];
+  const order=P.opportunitySort||'priority';
+  return `<div class="filterbar opportunity-work-filters"><label class="list-search">${icon('search')}<input id="list-search" value="${esc(P.q||'')}" placeholder="搜索客户、售卖产品或商机编号" aria-label="搜索当前列表"></label><div class="filter-selects"><select id="filter-stage" aria-label="筛选阶段"><option value="">全部阶段</option>${S.stages.map(stage=>`<option value="${esc(stage)}" ${P.stage===stage?'selected':''}>${esc(stage)}</option>`).join('')}</select>${S.actor.role==='admin'?ownerOptions(S,P.owner||''):''}<details class="opportunity-sort-picker"><summary>${order==='priority'?'排序':esc(sorts.find(([key])=>key===order)?.[1]||'排序')}</summary><select id="opportunity-sort" aria-label="商机推进排序">${sorts.map(([value,label])=>`<option value="${value}" ${order===value?'selected':''}>${label}</option>`).join('')}</select></details>${button('重置筛选','reset-filters','','ghost','refresh')}</div></div>`;
 }
 export function opportunities(S,P={}) {
   const mode=P.opportunityView==='ledger'?'ledger':'work',risk=P.risk||(mode==='work'?'active':'all');
@@ -112,7 +131,19 @@ export function opportunities(S,P={}) {
   const totalRows=list,known=totalRows.filter(o=>knownAmount(forecastAmount(o))),unknown=totalRows.length-known.length;
   const tabs=[['all','全部商机',scope.length],['active','进行中',active.length],['won','赢单',scope.filter(o=>isWonStage(o.stage)).length],['today','待跟进',selectOpportunities(S,{...P,opportunityView:mode,risk:'today'}).length],['risk','风险商机',active.filter(o=>riskReasons(o).length||o.risk?.level&&o.risk.level!=='normal').length]];
   const carried=P.customerLevel||P.saleType||P.from||P.to;
-  return `<link rel="stylesheet" href="./modules/opportunities.css">${monthlyBoard(S,P,'opportunity')}<nav class="opportunity-view-switch" aria-label="商机视图">${[['work','推进视图'],['ledger','商机总表']].map(([id,label])=>`<button type="button" data-action="opportunity-view" data-id="${id}" aria-pressed="${mode===id}" class="${mode===id?'active':''}">${icon(id==='work'?'arrow':'contracts')}${label}</button>`).join('')}<span>${mode==='work'?'围绕当前行动安排，按优先级推进':'按销售分组，保留完整商机台账'}</span></nav>${carried?`<p class="form-context">沿用看板筛选：${esc([P.customerLevel&&'客户'+P.customerLevel+'级',P.saleType,(P.from||P.to)&&`${P.from||'最早记录'} 至 ${P.to||'最新记录'}创建的商机`].filter(Boolean).join(' · '))}。可点击重置筛选查看全部。</p>`:''}<div class="list-summary opportunity-summary"><div class="segment">${tabs.map(([value,label,count])=>`<button type="button" data-action="risk-filter" data-id="${value}" class="${risk===value?'selected':''}">${label} <b>${count}</b></button>`).join('')}</div><span>${unknown?'已知':''}预计金额 <b>${plainMoney(sum(known,o=>Number(forecastAmount(o))))}</b>${unknown?`<small>另 ${unknown} 条待评估</small>`:''}</span></div><section class="panel opportunity-list-panel">${mode==='work'?workFilters(S,P)+opportunityWorkList(S,list):filters(S,P,'opportunities')+opportunityListTable(S,list,P)}<div class="table-footer">共 ${list.length} 条商机${mode==='ledger'?' · 按销售小二分组':' · 按当前推进条件展示'}<span>${S.actor.role==='admin'?'按授权团队范围查看':'仅展示本人有权查看的商机'}</span></div></section>`;
+  const viewSwitch = `<nav class="opportunity-view-switch" aria-label="商机视图">${[['work','推进视图'],['ledger','商机总表']].map(([id,label])=>
+    `<button type="button" data-action="opportunity-view" data-id="${id}" aria-pressed="${mode===id}" class="${mode===id?'active':''}">${icon(id==='work'?'arrow':'contracts')}${label}</button>`
+  ).join('')}</nav>`;
+  const riskTabs = `<div class="segment" role="group" aria-label="商机范围">${tabs.map(([value,label,count])=>
+    `<button type="button" data-action="risk-filter" data-id="${value}" class="${risk===value?'selected':''}" aria-pressed="${risk===value}">${label} <b>${count}</b></button>`
+  ).join('')}</div>`;
+  const carriedFilters = carried?`<p class="form-context">沿用看板筛选：${esc([P.customerLevel&&'客户'+P.customerLevel+'级',P.saleType,(P.from||P.to)&&`${P.from||'最早记录'} 至 ${P.to||'最新记录'}创建的商机`].filter(Boolean).join(' · '))}。可点击重置筛选查看全部。</p>`:'';
+  return `<link rel="stylesheet" href="./modules/opportunities.css"><div class="opportunity-page">
+    ${monthlyBoard(S,P,'opportunity')}
+    <div class="list-summary opportunity-summary">${viewSwitch}${riskTabs}<span>${unknown?'已知':''}预计金额 <b>${plainMoney(sum(known,o=>Number(forecastAmount(o))))}</b>${unknown?`<small>另 ${unknown} 条待评估</small>`:''}</span></div>
+    ${carriedFilters}
+    <section class="panel opportunity-list-panel">${mode==='work'?workFilters(S,P)+opportunityWorkList(S,list):filters(S,P,'opportunities')+opportunityListTable(S,list,P)}<div class="table-footer">共 ${list.length} 条商机${mode==='ledger'?' · 按销售小二分组':' · 按当前推进条件展示'}<span>${S.actor.role==='admin'?'按授权团队范围查看':'仅展示本人有权查看的商机'}</span></div></section>
+  </div>`;
 }
 function signedSummary(o){
   const actual=o.signed_summary;

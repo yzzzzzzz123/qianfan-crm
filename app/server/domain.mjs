@@ -1,4 +1,5 @@
 import {processLedger} from './performance-ledger.mjs';
+export {normalize, similarCustomer} from '../public/modules/customer-identity.js';
 export const SALE_TYPES = ['新签自建','新签分发','续费','增购'];
 export const ORDER_TYPES = ['代销','经销','千帆'];
 export const STAGES = [
@@ -76,15 +77,6 @@ export function manDays(value = 0) {
   const n = Number(value);
   assert(Number.isFinite(n) && n >= 0 && n <= 1000000 && Math.abs(n * 100 - Math.round(n * 100)) < 0.001, '人天数须为0至1000000之间、最多两位小数的数字');
   return Math.round(n * 100) / 100;
-}
-export const normalize = (s) => s.replace(/[\s（）()]/g, "").toLowerCase();
-export function similarCustomer(a,b) {
-  const tidy=s=>normalize(s).replace(/有限责任公司|股份有限公司|有限公司/g,'');
-  const x=Array.from(tidy(a)),y=Array.from(tidy(b));
-  if(Math.min(x.length,y.length)<4)return false;
-  let row=y.map((_,i)=>i+1);row.unshift(0);
-  for(let i=0;i<x.length;i++){const next=[i+1];for(let j=0;j<y.length;j++)next[j+1]=Math.min(next[j]+1,row[j+1]+1,row[j]+(x[i]===y[j]?0:1));row=next;}
-  return 1-row[y.length]/Math.max(x.length,y.length)>=0.82;
 }
 export const code = (prefix, id, created) =>
   `${prefix}${created.slice(0, 7).replace("-", "")}${String(id).padStart(4, "0")}`;

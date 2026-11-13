@@ -1,14 +1,13 @@
 import {createHash} from 'node:crypto';
 import {all,one,run,transaction} from './database.mjs';
-import {AppError,assert,normalize,now} from './domain.mjs';
+import {AppError,assert,now} from './domain.mjs';
+import {normalizeCompanyName,normalizeCreditCode} from '../public/modules/customer-identity.js';
 import {createQccMcpProfileProvider} from './qcc-mcp-profile.mjs';
 import {withQwenCompanyFallback} from './company-profile-fallback.mjs';
 
 export const COMPANY_PROFILE_DOC='https://openapi.qcc.com/dataApi/735';
 export const COMPANY_PROFILE_ENDPOINT='https://api.qichacha.com/ECIInfoVerify/GetInfo';
-const tidy=value=>String(value??'').normalize('NFKC').replace(/[\u200b-\u200d\u2060\ufeff]/g,'');
-export const normalizeCompanyName=value=>normalize(tidy(value));
-export const normalizeCreditCode=value=>tidy(value).replace(/\s/g,'').toUpperCase();
+export {normalizeCompanyName,normalizeCreditCode};
 const hash=value=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
 export const companyIdentity=customer=>hash([normalizeCompanyName(customer.name),normalizeCreditCode(customer.credit_code)]);
 export function assertCustomerIdentityUnique(db,{name,credit_code},exceptId=null) {

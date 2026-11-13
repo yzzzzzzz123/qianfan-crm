@@ -61,6 +61,7 @@ export function installProfitEditors(){
   setText(box.querySelector('[data-profit-adjust]'),baseCents==null?'填写毛利':'调整毛利');
   setText(box.querySelector('[data-profit-net]'),value==null?'待填写':plainMoney(value));
   setText(box.querySelector('[data-profit-net-rate]'),value==null?'':`毛利率 ${percent(value/amountCents*100)}`);
+  setText(row.querySelector('[data-profit-compact]'),value==null?'毛利待填写':`毛利 ${plainMoney(value)}`);
   box.querySelector('[data-profit-result]').dataset.profitState=value==null?'pending':value<0?'loss':'known';
   if(expense)expense.setCustomValidity('');
  }

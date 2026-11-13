@@ -1,22 +1,35 @@
 import {esc,plainMoney} from '../ui.js';
+import {normalizeCompanyName,normalizeCreditCode,similarCustomer} from './customer-identity.js';
 
-const normalize=value=>String(value||'').normalize('NFKC').toLocaleLowerCase().replace(/[\s\p{P}\p{Cf}]/gu,'');
-const companyStem=value=>normalize(value).replace(/有限责任公司|股份有限公司|有限公司|集团|公司/g,'');
 const amount=value=>Number.isSafeInteger(value)?plainMoney(value):'待核对';
 const transfers=new WeakMap();
+
+function setDuplicateAck(form, visible, required = false) {
+  const label = form.querySelector('[data-duplicate-ack]');
+  const check = form.elements.duplicate_ack;
+  label.hidden = !visible;
+  check.checked = false;
+  check.disabled = !visible;
+  check.required = required;
+}
 
 export function mountCustomerForm(form,S,{api}={}){
   if(!form)return;
   if(form.dataset.form==='customer'){
-    const box=form.querySelector('#duplicate-hints'),ack=form.querySelector('[data-duplicate-ack]');
+    const box=form.querySelector('#duplicate-hints');
     if(!box)return;
-    const refresh=()=>{
-      const name=form.elements.name.value,credit=form.elements.credit_code?.value||'',norm=normalize(name),code=normalize(credit);
-      const stem=companyStem(name);
-      const matches=(S.customers||[]).filter(c=>norm.length>1&&(normalize(c.name)===norm||normalize(c.short_name)===norm||stem.length>1&&(companyStem(c.name).includes(stem)||stem.includes(companyStem(c.name))))||code&&c.credit_code&&normalize(c.credit_code)===code).slice(0,5);
-      const exact=matches.some(c=>normalize(c.name)===norm||code&&c.credit_code&&normalize(c.credit_code)===code);
-      box.innerHTML=matches.length?`<div class="customer-duplicate-notice" role="status"><strong>${exact?'已有相同主体档案，请先查看':'找到疑似客户，请核对是否为同一企业'}</strong>${matches.map(c=>`<div><span>${esc(c.name)}<small>${esc(c.owner_id?S.users.find(u=>u.id===c.owner_id)?.name||'负责人待核对':'负责人待核对')}</small></span><button type="button" class="btn ghost" data-action="customer-duplicate-open" data-id="${c.id}">打开档案</button></div>`).join('')}</div>`:'';
-      if(ack){ack.hidden=!matches.length||exact;const check=ack.querySelector('input');if(check){check.checked=false;check.disabled=ack.hidden;}}
+    const refresh=event=>{
+      if(event?.isComposing)return;
+      if(form.dataset.customerDuplicateError){
+        form.querySelector('.form-error').textContent='';
+        delete form.dataset.customerDuplicateError;
+      }
+      const name=form.elements.name.value,code=normalizeCreditCode(form.elements.credit_code.value),norm=normalizeCompanyName(name);
+      const customers=S.customers||[];
+      const exact=customers.filter(c=>(norm&&normalizeCompanyName(c.name)===norm)||(code&&normalizeCreditCode(c.credit_code)===code));
+      const matches=(exact.length?exact:customers.filter(c=>similarCustomer(name,c.name))).slice(0,5);
+      box.innerHTML=matches.length?`<div class="customer-duplicate-notice" role="status"><strong>${exact.length?'已有相同主体档案，请先查看':'找到疑似客户，请核对是否为同一企业'}</strong>${matches.map(c=>`<div><span>${esc(c.name)}<small>${esc(c.owner_id?S.users.find(u=>u.id===c.owner_id)?.name||'负责人待核对':'负责人待核对')}</small></span><button type="button" class="btn ghost" data-action="customer-duplicate-open" data-id="${c.id}">打开档案</button></div>`).join('')}</div>`:'';
+      setDuplicateAck(form,matches.length>0&&!exact.length);
     };
     for(const name of ['name','credit_code'])form.elements[name]?.addEventListener('input',refresh);
     refresh();
@@ -28,6 +41,13 @@ export function mountCustomerForm(form,S,{api}={}){
     form.elements.ownership_scope.addEventListener('change',()=>renderTransfer(form,state));
     void refresh();
   }
+}
+
+export function showCustomerCreateError(form,error,submitted){
+  if(form.dataset.form!=='customer'||error.code!=='CUSTOMER_SIMILAR_NAME')return;
+  if(form.elements.name.value!==submitted.name||form.elements.credit_code.value!==submitted.credit_code)return;
+  setDuplicateAck(form,true,true);
+  form.dataset.customerDuplicateError='true';
 }
 
 function renderTransfer(form,state){
